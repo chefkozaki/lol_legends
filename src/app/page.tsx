@@ -82,8 +82,8 @@ export default async function Home() {
     },
     orderBy: { date: "asc" },
     include: {
-      homeTeam: { select: { name: true, region: true, logoUrl: true } },
-      awayTeam: { select: { name: true, region: true, logoUrl: true } }
+      homeTeam: { select: { name: true, region: true, logoUrl: true, abbreviation: true } },
+      awayTeam: { select: { name: true, region: true, logoUrl: true, abbreviation: true } }
     }
   });
 

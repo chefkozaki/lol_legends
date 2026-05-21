@@ -24,6 +24,7 @@ model User {
 model Team {
   id             String   @id @default(uuid())
   name           String
+  abbreviation   String?
   logoUrl        String?
   region         String   // LCK, LCP, LPL, LEC, CBLOL
   budget         Int      @default(1000000) // Ngân sách chuyển nhượng ($)

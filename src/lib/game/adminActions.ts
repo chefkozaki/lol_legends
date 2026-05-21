@@ -66,6 +66,7 @@ export async function adminUpdateTeamAction(teamId: string, data: {
   wins?: number;
   losses?: number;
   logoUrl?: string;
+  abbreviation?: string;
 }) {
   try {
     await checkAdmin();
@@ -82,6 +83,7 @@ export async function adminUpdateTeamAction(teamId: string, data: {
         wins: data.wins !== undefined ? Number(data.wins) : team.wins,
         losses: data.losses !== undefined ? Number(data.losses) : team.losses,
         logoUrl: data.logoUrl !== undefined ? data.logoUrl : team.logoUrl,
+        abbreviation: data.abbreviation !== undefined ? data.abbreviation : team.abbreviation,
       }
     });
 
@@ -149,6 +151,7 @@ export async function adminCreateTeamAction(data: {
   budget: number;
   salaryCap: number;
   logoUrl?: string;
+  abbreviation?: string;
 }) {
   try {
     const current = await checkAdmin();
@@ -170,6 +173,7 @@ export async function adminCreateTeamAction(data: {
         budget: Number(data.budget),
         salaryCap: Number(data.salaryCap),
         logoUrl: data.logoUrl || null,
+        abbreviation: data.abbreviation || null,
         isUser: false,
         wins: 0,
         losses: 0,

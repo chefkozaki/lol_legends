@@ -34,6 +34,8 @@ interface DraftScreenProps {
   matchId: string;
   homeTeamName: string;
   awayTeamName: string;
+  homeTeamAbbreviation?: string | null;
+  awayTeamAbbreviation?: string | null;
   isUserHome: boolean;
   userTeamName: string;
   opponentTeamName: string;
@@ -156,6 +158,8 @@ export default function DraftScreen({
   matchId,
   homeTeamName,
   awayTeamName,
+  homeTeamAbbreviation,
+  awayTeamAbbreviation,
   isUserHome,
   userTeamName,
   opponentTeamName,
@@ -500,10 +504,10 @@ export default function DraftScreen({
             {/* Left Box: Blue Bans */}
             <div className="flex flex-col items-start bg-black/40 border border-blue-900/20 rounded-lg p-3 backdrop-blur-sm w-[260px] shadow-lg">
               <div className="flex items-center gap-2 mb-2">
-                <TeamLogo teamName={homeTeamName} size={32} />
+                <TeamLogo teamName={homeTeamName} size={32} abbreviation={homeTeamAbbreviation} />
                 <div>
                   <h4 className="text-xs font-black text-blue-400 tracking-wider">BLUE BANS</h4>
-                  <p className="text-[10px] text-zinc-500 font-medium font-mono">OKSavingsBank BRION</p>
+                  <p className="text-[10px] text-zinc-500 font-medium font-mono truncate max-w-[150px]" title={homeTeamName}>{homeTeamName}</p>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -679,10 +683,10 @@ export default function DraftScreen({
             {/* Right Box: Red Bans */}
             <div className="flex flex-col items-end bg-black/40 border border-red-900/20 rounded-lg p-3 backdrop-blur-sm w-[260px] shadow-lg">
               <div className="flex items-center gap-2 mb-2 flex-row-reverse text-right">
-                <TeamLogo teamName={awayTeamName} size={32} />
+                <TeamLogo teamName={awayTeamName} size={32} abbreviation={awayTeamAbbreviation} />
                 <div>
                   <h4 className="text-xs font-black text-red-400 tracking-wider">RED BANS</h4>
-                  <p className="text-[10px] text-zinc-500 font-medium font-mono">Dplus KIA</p>
+                  <p className="text-[10px] text-zinc-500 font-medium font-mono truncate max-w-[150px]" title={awayTeamName}>{awayTeamName}</p>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -829,9 +833,12 @@ export default function DraftScreen({
           {/* Teams and Logos VS Row */}
           <div className="flex items-center justify-between w-full px-2">
             {/* Blue Logo */}
-            <div className="flex flex-col items-center gap-1.5 flex-1">
-              <TeamLogo teamName={homeTeamName} size={42} />
-              <span className="text-[10px] font-black text-zinc-350 tracking-wider font-mono">
+            <div className="flex flex-col items-center gap-1 flex-1">
+              <TeamLogo teamName={homeTeamName} size={42} abbreviation={homeTeamAbbreviation} />
+              <span className="text-xs font-black text-zinc-150 tracking-wider font-mono uppercase">
+                {homeTeamAbbreviation || homeTeamName.substring(0, 3).toUpperCase()}
+              </span>
+              <span className="text-[10px] font-bold text-zinc-450 tracking-wider font-mono">
                 {bluePlayers.length > 0 ? `${homeWins}W-${homeLosses}L` : "0W-0L"}
               </span>
             </div>
@@ -848,9 +855,12 @@ export default function DraftScreen({
             </div>
 
             {/* Red Logo */}
-            <div className="flex flex-col items-center gap-1.5 flex-1">
-              <TeamLogo teamName={awayTeamName} size={42} />
-              <span className="text-[10px] font-black text-zinc-350 tracking-wider font-mono">
+            <div className="flex flex-col items-center gap-1 flex-1">
+              <TeamLogo teamName={awayTeamName} size={42} abbreviation={awayTeamAbbreviation} />
+              <span className="text-xs font-black text-zinc-150 tracking-wider font-mono uppercase">
+                {awayTeamAbbreviation || awayTeamName.substring(0, 3).toUpperCase()}
+              </span>
+              <span className="text-[10px] font-bold text-zinc-450 tracking-wider font-mono">
                 {redPlayers.length > 0 ? `${awayWins}W-${awayLosses}L` : "0W-0L"}
               </span>
             </div>

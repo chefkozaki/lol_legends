@@ -10,6 +10,7 @@ import PlayerRadarChart from "./PlayerRadarChart";
 import DraftScreen from "./DraftScreen";
 import { TeamLogo, PlayerAvatar } from "@/components/ui/game-logo";
 import MatchLiveScreen from "./MatchLiveScreen";
+import MatchPrepScreen from "./MatchPrepScreen";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -68,6 +69,7 @@ interface Player {
 interface Team {
   id: string;
   name: string;
+  abbreviation?: string | null;
   logoUrl?: string | null;
   region: string;
   budget: number;
@@ -89,8 +91,8 @@ interface Match {
   awayScore: number;
   played: boolean;
   matchEvents: string | null;
-  homeTeam: { name: string; region: string };
-  awayTeam: { name: string; region: string };
+  homeTeam: { name: string; region: string; abbreviation?: string | null };
+  awayTeam: { name: string; region: string; abbreviation?: string | null };
 }
 
 interface Mail {
@@ -205,6 +207,7 @@ export default function GameDashboard({
   // Quản lý trạng thái Match Day
   const [matchDayState, setMatchDayState] = useState<{ matchId: string; date: string } | null>(null);
   const [draftMode, setDraftMode] = useState<boolean>(false);
+  const [showPrepScreen, setShowPrepScreen] = useState<boolean>(false);
   const [matchResult, setMatchResult] = useState<MatchSimulationResult | null>(null);
 
   const [isPending, startTransition] = useTransition();
@@ -256,6 +259,7 @@ export default function GameDashboard({
     losses: 0,
     points: 0,
     logoUrl: "",
+    abbreviation: "",
   });
 
   const [adminUsers, setAdminUsers] = useState<{
@@ -326,6 +330,7 @@ export default function GameDashboard({
             losses: t.losses,
             points: t.points,
             logoUrl: t.logoUrl || "",
+            abbreviation: (t as any).abbreviation || "",
           });
         }, 0);
       }
@@ -369,6 +374,7 @@ export default function GameDashboard({
           losses: 0,
           points: 0,
           logoUrl: "",
+          abbreviation: "",
         });
       }, 0);
     }
@@ -459,6 +465,7 @@ export default function GameDashboard({
         budget: adminTeamForm.budget,
         salaryCap: adminTeamForm.salaryCap,
         logoUrl: adminTeamForm.logoUrl || undefined,
+        abbreviation: adminTeamForm.abbreviation || undefined,
       });
       if (res.success) {
         alert("Thêm đội tuyển mới thành công!");
@@ -509,7 +516,7 @@ export default function GameDashboard({
       const res = await advanceDayAction();
       if (res.status === "MATCH_DAY" && res.matchId && res.date) {
         setMatchDayState({ matchId: res.matchId, date: res.date });
-        setDraftMode(true);
+        setShowPrepScreen(true);
       } else if (res.status === "SUCCESS") {
         setSelectedMailId(allMails[0]?.id || null);
       } else if (res.error) {
@@ -717,6 +724,73 @@ export default function GameDashboard({
   }, [allSavePlayers, allTeams, dbSearch, dbRegionFilter, dbRoleFilter, dbSortField, dbSortOrder]);
 
   // --- RENDERING DRAFT HOẶC MATCH LIVE ---
+  if (showPrepScreen && matchDayState) {
+    const match = userMatches.find(m => m.id === matchDayState.matchId);
+    const homeTeam = allTeamsInRegion.find(t => t.name === match?.homeTeam.name);
+    const awayTeam = allTeamsInRegion.find(t => t.name === match?.awayTeam.name);
+
+    if (homeTeam && awayTeam) {
+      const homePrepTeam = {
+        id: homeTeam.id,
+        name: homeTeam.name,
+        logoUrl: homeTeam.logoUrl,
+        abbreviation: homeTeam.abbreviation,
+        wins: homeTeam.wins,
+        losses: homeTeam.losses,
+        players: homeTeam.players.map(p => ({
+          id: p.id,
+          name: p.name,
+          role: p.role,
+          laning: p.laning,
+          teamfight: p.teamfight,
+          macro: p.macro,
+          mentality: p.mentality,
+          championPool: p.championPool,
+          age: p.age,
+          nationality: p.nationality
+        }))
+      };
+
+      const awayPrepTeam = {
+        id: awayTeam.id,
+        name: awayTeam.name,
+        logoUrl: awayTeam.logoUrl,
+        abbreviation: awayTeam.abbreviation,
+        wins: awayTeam.wins,
+        losses: awayTeam.losses,
+        players: awayTeam.players.map(p => ({
+          id: p.id,
+          name: p.name,
+          role: p.role,
+          laning: p.laning,
+          teamfight: p.teamfight,
+          macro: p.macro,
+          mentality: p.mentality,
+          championPool: p.championPool,
+          age: p.age,
+          nationality: p.nationality
+        }))
+      };
+
+      return (
+        <MatchPrepScreen
+          homeTeam={homePrepTeam}
+          awayTeam={awayPrepTeam}
+          currentDate={initialGameState.currentDate}
+          currentWeek={initialGameState.week}
+          onStartMatch={() => {
+            setShowPrepScreen(false);
+            setDraftMode(true);
+          }}
+          onClose={() => {
+            setShowPrepScreen(false);
+            setMatchDayState(null);
+          }}
+        />
+      );
+    }
+  }
+
   if (draftMode && matchDayState) {
     const match = userMatches.find(m => m.id === matchDayState.matchId);
     const opponentName = match?.homeTeamId === userTeam.id ? match?.awayTeam.name : match?.homeTeam.name;
@@ -738,6 +812,8 @@ export default function GameDashboard({
           matchId={matchDayState.matchId}
           homeTeamName={match?.homeTeam.name || ""}
           awayTeamName={match?.awayTeam.name || ""}
+          homeTeamAbbreviation={homeTeam?.abbreviation}
+          awayTeamAbbreviation={awayTeam?.abbreviation}
           isUserHome={!!isUserHome}
           userTeamName={userTeam.name}
           opponentTeamName={opponentName || ""}
@@ -770,6 +846,8 @@ export default function GameDashboard({
             result={matchResult}
             homeTeamName={match?.homeTeam.name || ""}
             awayTeamName={match?.awayTeam.name || ""}
+            homeTeamAbbreviation={match?.homeTeam.abbreviation}
+            awayTeamAbbreviation={match?.awayTeam.abbreviation}
             isUserHome={!!isUserHome}
             onClose={() => {
               setMatchResult(null);
@@ -2348,6 +2426,17 @@ export default function GameDashboard({
                             value={adminTeamForm.salaryCap}
                             onChange={(e) => setAdminTeamForm({ ...adminTeamForm, salaryCap: Number(e.target.value) })}
                             className="bg-zinc-950 border-zinc-800 text-zinc-100 text-xs"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Tên viết tắt (Abbreviation)</label>
+                          <Input
+                            type="text"
+                            value={adminTeamForm.abbreviation}
+                            onChange={(e) => setAdminTeamForm({ ...adminTeamForm, abbreviation: e.target.value })}
+                            className="bg-zinc-950 border-zinc-800 text-zinc-100 text-xs"
+                            placeholder="Ví dụ: T1, GEN, GAM..."
                           />
                         </div>
 

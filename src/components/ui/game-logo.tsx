@@ -78,14 +78,15 @@ interface TeamLogoProps {
   size?: number;
   className?: string;
   imageUrl?: string | null;
+  abbreviation?: string | null;
 }
 
-export const TeamLogo: React.FC<TeamLogoProps> = ({ teamName, size = 48, className = "", imageUrl }) => {
+export const TeamLogo: React.FC<TeamLogoProps> = ({ teamName, size = 48, className = "", imageUrl, abbreviation }) => {
   const [imgError, setImgError] = React.useState(false);
   const hash = getHash(teamName);
   const gradient = LOGO_GRADIENTS[hash % LOGO_GRADIENTS.length];
   const path = BADGE_SHAPES[hash % BADGE_SHAPES.length];
-  const initials = getTeamInitials(teamName);
+  const initials = abbreviation || getTeamInitials(teamName);
 
   const gradId = `grad-${hash}`;
 

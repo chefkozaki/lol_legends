@@ -14,6 +14,8 @@ interface MatchLiveScreenProps {
   result: MatchSimulationResult;
   homeTeamName: string;
   awayTeamName: string;
+  homeTeamAbbreviation?: string | null;
+  awayTeamAbbreviation?: string | null;
   isUserHome: boolean;
   onClose: () => void;
 }
@@ -22,6 +24,8 @@ export default function MatchLiveScreen({
   result,
   homeTeamName,
   awayTeamName,
+  homeTeamAbbreviation,
+  awayTeamAbbreviation,
   isUserHome,
   onClose
 }: MatchLiveScreenProps) {
@@ -185,7 +189,7 @@ export default function MatchLiveScreen({
             </div>
           </div>
           <div className={`w-12 h-12 rounded-lg bg-blue-900/20 border-2 flex items-center justify-center font-black text-blue-400 text-lg ${isUserHome ? "border-blue-500 shadow-md shadow-blue-500/20" : "border-zinc-700"}`}>
-            {homeTeamName.substring(0, 2).toUpperCase()}
+            {homeTeamAbbreviation || homeTeamName.substring(0, 2).toUpperCase()}
           </div>
         </div>
 
@@ -205,7 +209,7 @@ export default function MatchLiveScreen({
         {/* Away Team */}
         <div className="flex items-center gap-4 w-full sm:w-1/3 justify-start">
           <div className={`w-12 h-12 rounded-lg bg-red-900/20 border-2 flex items-center justify-center font-black text-red-400 text-lg ${!isUserHome ? "border-red-500 shadow-md shadow-red-500/20" : "border-zinc-700"}`}>
-            {awayTeamName.substring(0, 2).toUpperCase()}
+            {awayTeamAbbreviation || awayTeamName.substring(0, 2).toUpperCase()}
           </div>
           <div>
             <h3 className="text-xl font-black text-zinc-100 tracking-tight">{awayTeamName}</h3>

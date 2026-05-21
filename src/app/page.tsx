@@ -88,7 +88,7 @@ export default async function Home() {
   });
 
   // Tính số tuần thi đấu động dựa trên ngày
-  const userMatches = rawUserMatches.map(m => {
+  const userMatches = rawUserMatches.map((m: any) => {
     const start = new Date("2026-01-05");
     const current = new Date(m.date);
     const diffTime = Math.abs(current.getTime() - start.getTime());

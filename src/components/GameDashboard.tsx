@@ -91,8 +91,8 @@ interface Match {
   awayScore: number;
   played: boolean;
   matchEvents: string | null;
-  homeTeam: { name: string; region: string; abbreviation?: string | null };
-  awayTeam: { name: string; region: string; abbreviation?: string | null };
+  homeTeam: { name: string; region: string; abbreviation?: string | null; logoUrl?: string | null };
+  awayTeam: { name: string; region: string; abbreviation?: string | null; logoUrl?: string | null };
 }
 
 interface Mail {

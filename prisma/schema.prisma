@@ -1,0 +1,130 @@
+datasource db {
+  provider = "sqlite"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id          String      @id @default(uuid())
+  username    String      @unique
+  displayName String
+  password    String      // Lưu password hash
+  role        String      @default("NORMAL") // "ADMIN", "NORMAL"
+  createdAt   DateTime    @default(now())
+  
+  gameState   GameState?
+  teams       Team[]
+  players     Player[]
+  matches     Match[]
+  mails       Mail[]
+}
+
+model Team {
+  id             String   @id @default(uuid())
+  name           String
+  logoUrl        String?
+  region         String   // LCK, LCP, LPL, LEC, CBLOL
+  budget         Int      @default(1000000) // Ngân sách chuyển nhượng ($)
+  salaryCap      Int      @default(500000)  // Quỹ lương tối đa hàng năm ($)
+  isUser         Boolean  @default(false)
+  points         Int      @default(0)       // Điểm số giải đấu khu vực
+  wins           Int      @default(0)
+  losses         Int      @default(0)
+  
+  players        Player[]
+  homeMatches    Match[]  @relation("HomeTeam")
+  awayMatches    Match[]  @relation("AwayTeam")
+
+  // Đa tài khoản: Liên kết với User sở hữu thế giới này
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([name, userId]) // Đảm bảo tên đội là duy nhất đối với mỗi User
+}
+
+model Player {
+  id           String   @id @default(uuid())
+  name         String
+  realName     String?
+  avatarUrl    String?  // URL ảnh đại diện tuyển thủ
+  teamId       String?
+  team         Team?    @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  role         String   // TOP, JUG, MID, BOT, SUP
+  age          Int
+  nationality  String
+  salary       Int      @default(50000)
+  contractEnd  Int      @default(2027)   // Năm hết hạn hợp đồng
+  
+  // Chỉ số (1-100)
+  laning       Int
+  teamfight    Int
+  macro        Int
+  mentality    Int
+  championPool Int
+  form         Float    @default(7.0)    // Phong độ trung bình (1.0 - 10.0)
+  value        Int      @default(100000) // Giá trị chuyển nhượng ước tính
+
+  // Đa tài khoản
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Match {
+  id           String   @id @default(uuid())
+  tournament   String   // REGIONAL, FIRST_STAND, MSI, EWC, WORLDS
+  homeTeamId   String
+  homeTeam     Team     @relation("HomeTeam", fields: [homeTeamId], references: [id], onDelete: Cascade)
+  awayTeamId   String
+  awayTeam     Team     @relation("AwayTeam", fields: [awayTeamId], references: [id], onDelete: Cascade)
+  date         String   // Định dạng YYYY-MM-DD
+  played       Boolean  @default(false)
+  homeScore    Int      @default(0)
+  awayScore    Int      @default(0)
+  matchEvents  String?  // JSON string lưu trữ diễn biến trận đấu phục vụ replay
+
+  // Đa tài khoản
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model GameState {
+  id           Int      @id @default(autoincrement())
+  currentDate  String   @default("2026-01-05")
+  userTeamId   String?
+  seasonState  String   @default("REGIONAL_SEASON") // REGIONAL_SEASON, FIRST_STAND, MSI, EWC, WORLDS, OFF_SEASON
+  week         Int      @default(1)
+  dayOfSeason  Int      @default(1)
+
+  // Đa tài khoản (Mỗi User có tối đa 1 GameState)
+  userId       String?  @unique
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Mail {
+  id           String   @id @default(uuid())
+  title        String
+  content      String
+  date         String
+  sender       String
+  read         Boolean  @default(false)
+  category     String   @default("GENERAL") // GENERAL, TRANSFER, MATCH, BOARD
+
+  // Đa tài khoản
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ChampionTier {
+  id       String  @id
+  tier     String
+  imageUrl String?
+}
+
+model Tournament {
+  id       String  @id
+  name     String
+  imageUrl String?
+}
+

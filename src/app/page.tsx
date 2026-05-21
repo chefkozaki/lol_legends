@@ -1,65 +1,135 @@
-import Image from "next/image";
+import { db } from "@/lib/db";
+import { getCurrentUser } from "@/lib/auth";
+import AuthScreen from "@/components/AuthScreen";
+import StartGame from "@/components/StartGame";
+import GameDashboard from "@/components/GameDashboard";
+import { getChampionTiersAction, getTournamentsAction } from "@/lib/game/actions";
 
-export default function Home() {
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+  // 1. Kiểm tra tài khoản người dùng hiện tại
+  const currentUser = await getCurrentUser();
+
+  // 2. Nếu CHƯA ĐĂNG NHẬP, hiển thị màn hình Đăng nhập / Đăng ký
+  if (!currentUser) {
+    return <AuthScreen />;
+  }
+
+  // 3. Nếu ĐÃ ĐĂNG NHẬP, lấy GameState của tài khoản này
+  let gameState = await db.gameState.findUnique({
+    where: { userId: currentUser.id }
+  });
+
+  // 4. Nếu người chơi CHƯA KHỞI TẠO GAME / CHƯA CHỌN ĐỘI TUYỂN
+  if (!gameState || !gameState.userTeamId) {
+    // Lấy danh sách 5 đội tuyển mẫu ngẫu nhiên (có userId = null) từ database để người chơi chọn
+    const lckTeams = await db.team.findMany({ where: { region: "LCK", userId: null }, include: { players: true } });
+    const lcpTeams = await db.team.findMany({ where: { region: "LCP", userId: null }, include: { players: true } });
+    const lplTeams = await db.team.findMany({ where: { region: "LPL", userId: null }, include: { players: true } });
+    const lecTeams = await db.team.findMany({ where: { region: "LEC", userId: null }, include: { players: true } });
+    const cblolTeams = await db.team.findMany({ where: { region: "CBLOL", userId: null }, include: { players: true } });
+
+    const getRandom = (arr: any[]) => arr[Math.floor(Math.random() * arr.length)];
+    
+    const randomTeams = [
+      getRandom(lckTeams),
+      getRandom(lcpTeams),
+      getRandom(lplTeams),
+      getRandom(lecTeams),
+      getRandom(cblolTeams)
+    ].filter(Boolean);
+
+    return <StartGame teams={randomTeams} />;
+  }
+
+  // 5. Nếu người chơi ĐÃ CÓ GAMESTATE & ĐÃ CHỌN ĐỘI TUYỂN
+  // Lấy đội tuyển của người dùng (lọc theo userId và userTeamId)
+  const userTeam = await db.team.findFirst({
+    where: { id: gameState.userTeamId, userId: currentUser.id },
+    include: { players: true }
+  });
+
+  if (!userTeam) {
+    // Đề phòng trường hợp đội tuyển bị lỗi, reset GameState để người dùng chọn lại
+    await db.gameState.delete({
+      where: { userId: currentUser.id }
+    });
+    return (
+      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-6 text-center">
+        <p className="text-sm text-zinc-400">Không tìm thấy đội tuyển của bạn. Vui lòng F5 để tải lại trang chọn đội.</p>
+      </div>
+    );
+  }
+
+  // Lấy tất cả các đội bóng thuộc cùng Save Game của người dùng
+  const allTeams = await db.team.findMany({
+    where: { userId: currentUser.id },
+    include: { players: true }
+  });
+
+  // Lọc lấy các đội bóng trong khu vực của người dùng
+  const allTeamsInRegion = allTeams.filter(t => t.region === userTeam.region);
+
+  // Lấy lịch thi đấu của người chơi
+  const rawUserMatches = await db.match.findMany({
+    where: {
+      userId: currentUser.id,
+      OR: [
+        { homeTeamId: userTeam.id },
+        { awayTeamId: userTeam.id }
+      ]
+    },
+    orderBy: { date: "asc" },
+    include: {
+      homeTeam: { select: { name: true, region: true, logoUrl: true } },
+      awayTeam: { select: { name: true, region: true, logoUrl: true } }
+    }
+  });
+
+  // Tính số tuần thi đấu động dựa trên ngày
+  const userMatches = rawUserMatches.map(m => {
+    const start = new Date("2026-01-05");
+    const current = new Date(m.date);
+    const diffTime = Math.abs(current.getTime() - start.getTime());
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    const week = Math.floor(diffDays / 7) + 1;
+    return { ...m, week };
+  });
+
+  // Lấy hòm thư của người chơi
+  const allMails = await db.mail.findMany({
+    where: { userId: currentUser.id },
+    orderBy: { date: "desc" }
+  });
+
+  // Lấy danh sách tuyển thủ tự do (thuộc cùng Save Game)
+  const freeAgents = await db.player.findMany({
+    where: { teamId: null, userId: currentUser.id }
+  });
+
+  // Lấy danh sách tier tướng và ảnh tướng
+  const tiersResult = await getChampionTiersAction();
+  const initialChampionTiers = (tiersResult && tiersResult.success) ? tiersResult.tiers : {};
+  const initialChampionImages = (tiersResult && tiersResult.success) ? (tiersResult as any).images : {};
+
+  // Lấy danh sách giải đấu
+  const tournamentsResult = await getTournamentsAction();
+  const initialTournaments = (tournamentsResult && tournamentsResult.success) ? tournamentsResult.tournaments : {};
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <GameDashboard
+      initialGameState={gameState}
+      userTeam={userTeam}
+      allTeamsInRegion={allTeamsInRegion}
+      allTeams={allTeams}
+      userMatches={userMatches}
+      allMails={allMails}
+      freeAgents={freeAgents}
+      currentUser={currentUser}
+      initialChampionTiers={initialChampionTiers}
+      initialChampionImages={initialChampionImages}
+      initialTournaments={initialTournaments}
+    />
   );
 }

@@ -2,11 +2,33 @@
 
 import React, { useState, useEffect } from "react";
 import { CHAMPIONS, Champion } from "@/lib/game/champions";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Info, HelpCircle, XCircle, Play, Shield, Sword, Skull, Flame, Target, Wand2 } from "lucide-react";
+import { 
+  Info, 
+  HelpCircle, 
+  XCircle, 
+  Play, 
+  Shield, 
+  Sword, 
+  Skull, 
+  Flame, 
+  Target, 
+  Wand2, 
+  Sparkles, 
+  Heart, 
+  Search,
+  AlertTriangle 
+} from "lucide-react";
 import { TeamLogo } from "@/components/ui/game-logo";
+
+export interface DraftPlayer {
+  id: string;
+  name: string;
+  role: string;
+  realName?: string | null;
+  avatarUrl?: string | null;
+}
 
 interface DraftScreenProps {
   matchId: string;
@@ -15,7 +37,8 @@ interface DraftScreenProps {
   isUserHome: boolean;
   userTeamName: string;
   opponentTeamName: string;
-  opponentPlayers: any[];
+  opponentPlayers: DraftPlayer[];
+  userPlayers: DraftPlayer[];
   onDraftComplete: (
     draft: { bans: string[]; picks: Record<string, string> },
     opponentDraft: { bans: string[]; picks: Record<string, string> }
@@ -23,6 +46,12 @@ interface DraftScreenProps {
   isPending: boolean;
   championTiers: Record<string, string>;
   championImages?: Record<string, string>;
+  currentDate?: string;
+  currentWeek?: number;
+  homeWins?: number;
+  homeLosses?: number;
+  awayWins?: number;
+  awayLosses?: number;
 }
 
 type DraftStep = {
@@ -70,6 +99,59 @@ const shuffleArray = <T,>(array: T[]): T[] => {
   return arr;
 };
 
+// DDragon Names Mapping
+const DDRAGON_NAMES: Record<string, string> = {
+  aatrox: "Aatrox",
+  ornn: "Ornn",
+  ksante: "KSante",
+  renekton: "Renekton",
+  jax: "Jax",
+  fiora: "Fiora",
+  jayce: "Jayce",
+  leesin: "LeeSin",
+  viego: "Viego",
+  maokai: "Maokai",
+  sejuani: "Sejuani",
+  graves: "Graves",
+  nidalee: "Nidalee",
+  xinzhao: "XinZhao",
+  azir: "Azir",
+  orianna: "Orianna",
+  ahri: "Ahri",
+  yone: "Yone",
+  syndra: "Syndra",
+  taliyah: "Taliyah",
+  sylas: "Sylas",
+  zeri: "Zeri",
+  jinx: "Jinx",
+  aphelios: "Aphelios",
+  kaisa: "KaiSa",
+  lucian: "Lucian",
+  ezreal: "Ezreal",
+  kalista: "Kalista",
+  thresh: "Thresh",
+  nautilus: "Nautilus",
+  rakan: "Rakan",
+  lulu: "Lulu",
+  milio: "Milio",
+  leona: "Leona",
+  senna: "Senna",
+};
+
+function getDDragonName(champId: string): string {
+  return DDRAGON_NAMES[champId] || (champId.charAt(0).toUpperCase() + champId.slice(1));
+}
+
+function getChampionSplashUrl(champId: string): string {
+  const dDragonName = getDDragonName(champId);
+  return `https://ddragon.leagueoflegends.com/cdn/img/champion/loading/${dDragonName}_0.jpg`;
+}
+
+function getChampionIconUrl(champId: string): string {
+  const dDragonName = getDDragonName(champId);
+  return `https://ddragon.leagueoflegends.com/cdn/14.3.1/img/champion/${dDragonName}.png`;
+}
+
 export default function DraftScreen({
   matchId,
   homeTeamName,
@@ -78,10 +160,17 @@ export default function DraftScreen({
   userTeamName,
   opponentTeamName,
   opponentPlayers,
+  userPlayers,
   onDraftComplete,
   isPending,
   championTiers,
-  championImages
+  championImages,
+  currentDate = "2026-01-05",
+  currentWeek = 1,
+  homeWins = 0,
+  homeLosses = 0,
+  awayWins = 0,
+  awayLosses = 0,
 }: DraftScreenProps) {
   // Trạng thái cấm/chọn riêng cho từng bên
   const [blueBans, setBlueBans] = useState<string[]>([]);
@@ -104,6 +193,10 @@ export default function DraftScreen({
   const [activeRole, setActiveRole] = useState<string | null>(null);
   const [isAiThinking, setIsAiThinking] = useState<boolean>(false);
 
+  // Search và Filter ở danh sách tướng
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [selectedRoleFilter, setSelectedRoleFilter] = useState<string>("ALL");
+
   // Đọc thông tin bước hiện tại
   const currentStep = currentStepIndex < DRAFT_STEPS.length ? DRAFT_STEPS[currentStepIndex] : null;
   const isUserTurn = currentStep ? currentStep.side === (isUserHome ? "BLUE" : "RED") : false;
@@ -114,17 +207,23 @@ export default function DraftScreen({
   const userPicks = isUserHome ? bluePicks : redPicks;
   const oppPicks = isUserHome ? redPicks : bluePicks;
 
+  // Sắp xếp các danh sách tuyển thủ
+  const bluePlayers = isUserHome ? userPlayers : opponentPlayers;
+  const redPlayers = isUserHome ? opponentPlayers : userPlayers;
+
   // Tự động tìm vai trò trống đầu tiên cho người chơi khi đến lượt pick
   const autoSelectActiveRole = (currentPicks: Record<string, string>) => {
     const roles = ["TOP", "JUG", "MID", "BOT", "SUP"];
     for (const r of roles) {
       if (!currentPicks[r]) {
         setActiveRole(r);
+        setSelectedRoleFilter(r); // Tự động nhảy filter tướng theo vai trò đang chọn
         return r;
       }
     }
     return null;
   };
+
 
   // Thực hiện lượt cấm/chọn tự động của AI
   const executeAITurn = (step: DraftStep) => {
@@ -193,19 +292,32 @@ export default function DraftScreen({
     const isUserSide = step.side === (isUserHome ? "BLUE" : "RED");
 
     if (!isUserSide) {
-      setIsAiThinking(true);
+      const thinkingTimer = setTimeout(() => {
+        setIsAiThinking(true);
+      }, 0);
       const timer = setTimeout(() => {
         executeAITurn(step);
         setIsAiThinking(false);
       }, 1200); // 1.2 giây trì hoãn tự nhiên
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(thinkingTimer);
+        clearTimeout(timer);
+      };
     } else {
       // Đến lượt người chơi: Tự động trỏ vào vai trò trống đầu tiên nếu chưa chọn
       if (step.type === "PICK") {
         const uPicks = isUserHome ? bluePicks : redPicks;
         if (!activeRole || uPicks[activeRole]) {
-          autoSelectActiveRole(uPicks);
+          setTimeout(() => {
+            autoSelectActiveRole(uPicks);
+          }, 0);
         }
+      } else {
+        // Giai đoạn ban: không cần khóa role
+        setTimeout(() => {
+          setActiveRole(null);
+          setSelectedRoleFilter("ALL");
+        }, 0);
       }
     }
   }, [currentStepIndex, isUserHome, bluePicks, redPicks, activeRole]);
@@ -222,6 +334,7 @@ export default function DraftScreen({
     } else {
       setRedBans(prev => [...prev, champId]);
     }
+    setSearchQuery("");
     setCurrentStepIndex(prev => prev + 1);
   };
 
@@ -237,6 +350,7 @@ export default function DraftScreen({
     } else {
       setRedPicks(prev => ({ ...prev, [role]: champId }));
     }
+    setSearchQuery("");
     setActiveRole(null); // Reset vai trò để useEffect chọn cái tiếp theo
     setCurrentStepIndex(prev => prev + 1);
   };
@@ -288,560 +402,557 @@ export default function DraftScreen({
     }
   };
 
-  // Tạo thông báo trạng thái
-  const getStatusMessage = () => {
+  // Tạo thông báo trạng thái dạng LCK Broadcast Banner
+  const getBannerMessage = () => {
     if (!currentStep) {
-      return "Cấm chọn hoàn tất! Hãy bấm nút Xác Nhận bên dưới để bắt đầu thi đấu.";
+      return "DRAFT COMPLETED";
     }
 
-    const sideName = currentStep.side === "BLUE" ? "Bên Xanh (Blue)" : "Bên Đỏ (Red)";
-    const typeName = currentStep.type === "BAN" ? "CẤM" : "CHỌN";
-    
-    // Map index sang số thứ tự tương ứng (1 đến 5)
-    const phaseNum = currentStep.type === "BAN"
-      ? `lượt cấm thứ ${currentStep.index + 1}`
-      : `lượt chọn thứ ${currentStep.index + 1}`;
-
-    if (isAiThinking) {
-      return `Đối thủ đang suy nghĩ (${sideName} thực hiện ${typeName})...`;
-    }
-
-    if (isUserTurn) {
-      return `Lượt của bạn: Thực hiện ${typeName} tướng cho ${sideName} (${phaseNum}).`;
-    }
-
-    return `Lượt đối thủ: Đang chờ ${sideName} thực hiện ${typeName} (${phaseNum})...`;
+    const sideName = currentStep.side === "BLUE" ? "BLUE TEAM" : "RED TEAM";
+    const typeName = currentStep.type === "BAN" ? "BANNING" : "PICKING";
+    return `${sideName} ${typeName}`;
   };
 
-  return (
-    <div className="w-full bg-zinc-950 text-zinc-100 p-6 rounded-xl border border-zinc-800 shadow-2xl relative overflow-hidden">
-      {/* Glow Effect */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[300px] rounded-full bg-blue-900/10 blur-[100px] pointer-events-none" />
+  const getSubBannerMessage = () => {
+    if (!currentStep) {
+      return "Click confirmation button below to start match simulation";
+    }
+    const typeName = currentStep.type === "BAN" ? "CẤM TƯỚNG" : "CHỌN TƯỚNG";
+    const phaseText = currentStep.type === "BAN" 
+      ? `Lượt cấm thứ ${currentStep.index + 1}/5` 
+      : `Lượt chọn thứ ${currentStep.index + 1}/5`;
 
-      {/* Header */}
-      <div className="flex justify-between items-center border-b border-zinc-800 pb-4 mb-6 z-10 relative">
-        <div className="flex items-center gap-4">
-          <TeamLogo teamName={userTeamName} size={60} />
-          <div>
-            <Badge className="bg-red-600 font-bold mb-1">DRAFT PHASE</Badge>
-            <h2 className="text-3xl font-extrabold tracking-tight">CẤM CHỌN TƯỚNG</h2>
-            <p className="text-xs text-zinc-400 mt-0.5">
-              Đối thủ: <span className="font-semibold text-zinc-300">{opponentTeamName}</span>
+    if (isAiThinking) {
+      return `Máy đang phân tích lượt ${currentStep.type === "BAN" ? "cấm" : "chọn"}...`;
+    }
+    if (isUserTurn) {
+      return `LƯỢT CỦA BẠN: Thực hiện ${typeName} (${phaseText})`;
+    }
+    return `Lượt của đối thủ: Chờ ${currentStep.side === "BLUE" ? "Bên Xanh" : "Bên Đỏ"} thực hiện...`;
+  };
+
+  // Lọc danh sách tướng hiển thị ở Grid
+  const filteredChampions = CHAMPIONS.filter(champ => {
+    const matchesSearch = champ.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesRole = selectedRoleFilter === "ALL" || champ.role === selectedRoleFilter;
+    return matchesSearch && matchesRole;
+  });
+
+  // Helper hiển thị icon vai trò
+  const renderRoleIcon = (role: string, className = "w-4 h-4") => {
+    switch (role.toUpperCase()) {
+      case "TOP": return <Sword className={className} />;
+      case "JUG": return <Sparkles className={className} />;
+      case "MID": return <Flame className={className} />;
+      case "BOT": return <Target className={className} />;
+      case "SUP": return <Heart className={className} />;
+      default: return <HelpCircle className={className} />;
+    }
+  };
+
+  // Xác định player theo role
+  const getPlayerNameByRole = (players: DraftPlayer[], role: string) => {
+    const p = players.find(x => x.role === role);
+    return p ? p.name : role;
+  };
+
+  // Xác định vị trí active pick hiện tại của mỗi bên
+  const activeBlueRole = (currentStep && currentStep.side === "BLUE" && currentStep.type === "PICK")
+    ? (isUserHome ? activeRole : opponentRoleOrder[currentStep.index])
+    : null;
+
+  const activeRedRole = (currentStep && currentStep.side === "RED" && currentStep.type === "PICK")
+    ? (!isUserHome ? activeRole : opponentRoleOrder[currentStep.index])
+    : null;
+
+  return (
+    <div className="w-full min-h-screen bg-zinc-950 flex flex-col justify-between select-none font-sans overflow-hidden text-zinc-100">
+      
+      {/* 1. TOP BROADCAST STAGE OVERLAY */}
+      <div 
+        className="relative flex-grow flex flex-col justify-between p-6 bg-cover bg-center overflow-hidden min-h-[460px]"
+        style={{ backgroundImage: "url('/esports_stage.png')" }}
+      >
+        {/* Darkened stadium background overlays */}
+        <div className="absolute inset-0 bg-black/60" />
+        <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-transparent to-black/30" />
+        
+        {/* Top-level grid for broadcast content */}
+        <div className="w-full flex flex-col justify-between h-full z-10 gap-4 flex-grow">
+          
+          {/* Header Row: Live Turn Banner */}
+          <div className="flex flex-col items-center justify-center text-center mt-2 animate-fade-in">
+            <h2 className={`text-4xl font-black tracking-widest ${
+              !currentStep ? 'text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.5)]' :
+              currentStep.side === 'BLUE' ? 'text-blue-400 drop-shadow-[0_0_15px_rgba(96,165,250,0.5)] animate-pulse' :
+              'text-red-400 drop-shadow-[0_0_15px_rgba(248,113,113,0.5)] animate-pulse'
+            }`}>
+              {getBannerMessage()}
+            </h2>
+            <p className="text-zinc-400 text-xs font-semibold tracking-wider uppercase mt-1">
+              {getSubBannerMessage()}
             </p>
           </div>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="text-right">
-            <div className="text-sm font-semibold text-zinc-400 font-bold">PHÂN KHU: {isUserHome ? "Bên Xanh (Xanh)" : "Bên Đỏ (Đỏ)"}</div>
-            <div className="text-xs text-zinc-500">Người chơi: {userTeamName}</div>
-          </div>
-          <TeamLogo teamName={opponentTeamName} size={80} />
-        </div>
-      </div>
 
-      {/* Timeline Tiến trình Cấm Chọn */}
-      <div className="w-full bg-zinc-900/80 border border-zinc-850 rounded-xl p-4 mb-6 flex flex-col md:flex-row justify-between items-center gap-4 z-10 relative shadow-inner">
-        <div className="flex items-center gap-3">
-          <div className={`w-3 h-3 rounded-full ${
-            !currentStep 
-              ? "bg-emerald-500" 
-              : isAiThinking 
-              ? "bg-amber-500 animate-ping" 
-              : isUserTurn 
-              ? "bg-blue-500 animate-pulse" 
-              : "bg-red-500"
-          }`} />
-          <div>
-            <div className="text-[10px] uppercase font-bold tracking-wider text-zinc-500">
-              {currentStep ? `Tiến trình: Lượt ${currentStepIndex + 1} / 20` : "Trạng thái"}
-            </div>
-            <div className="text-sm font-black text-zinc-200">
-              {getStatusMessage()}
-            </div>
-          </div>
-        </div>
-        
-        {/* Thanh dấu tròn các bước cấm chọn */}
-        <div className="flex gap-1 flex-wrap justify-center">
-          {DRAFT_STEPS.map((step, idx) => {
-            const isCompleted = idx < currentStepIndex;
-            const isActive = idx === currentStepIndex;
-            const isBlue = step.side === "BLUE";
+          {/* Middle Row: Floating Bans + Center Selector */}
+          <div className="flex flex-row items-center justify-between w-full gap-4 my-auto">
             
-            return (
-              <div
-                key={idx}
-                title={`${step.side === "BLUE" ? "Bên Xanh" : "Bên Đỏ"} - ${step.type === "BAN" ? "Cấm" : "Chọn"}`}
-                className={`w-5 h-5 rounded-sm flex items-center justify-center text-[8px] font-extrabold select-none transition-all ${
-                  isActive
-                    ? "ring-2 ring-white scale-110 z-10 font-black shadow-lg"
-                    : ""
-                } ${
-                  isCompleted
-                    ? "bg-zinc-800 text-zinc-500 opacity-30 border border-zinc-700/50"
-                    : isBlue
-                    ? isActive
-                      ? "bg-blue-600 text-white animate-pulse"
-                      : "bg-blue-950/40 text-blue-400 border border-blue-900/40"
-                    : isActive
-                    ? "bg-rose-600 text-white animate-pulse"
-                    : "bg-rose-950/40 text-rose-450 border border-rose-900/40"
-                }`}
-              >
-                {step.type === "BAN" ? "C" : "P"}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 z-10 relative">
-        {/* Cột trái: Lượt cấm & Chọn của bạn */}
-        <div className="lg:col-span-1 space-y-4">
-          <Card className={`bg-zinc-900/90 border-zinc-800 ${isUserHome ? 'border-blue-900/30' : 'border-red-900/30'}`}>
-            <CardHeader className="py-3 border-b border-zinc-800 bg-zinc-900">
-              <CardTitle className="text-sm font-bold flex items-center justify-between text-zinc-200">
-                <div className="flex items-center gap-2">
-                  <TeamLogo teamName={userTeamName} size={36} />
-                  <span>CẤM CỦA BẠN ({userBans.length}/5)</span>
+            {/* Left Box: Blue Bans */}
+            <div className="flex flex-col items-start bg-black/40 border border-blue-900/20 rounded-lg p-3 backdrop-blur-sm w-[260px] shadow-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <TeamLogo teamName={homeTeamName} size={32} />
+                <div>
+                  <h4 className="text-xs font-black text-blue-400 tracking-wider">BLUE BANS</h4>
+                  <p className="text-[10px] text-zinc-500 font-medium font-mono">OKSavingsBank BRION</p>
                 </div>
-                {isUserTurn && currentStep?.type === "BAN" && (
-                  <Badge className="bg-amber-600 animate-pulse text-[10px]">Đang Cấm</Badge>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="py-4 grid grid-cols-5 gap-2">
-              {[0, 1, 2, 3, 4].map(idx => {
-                const champId = userBans[idx];
-                const champ = CHAMPIONS.find(c => c.id === champId);
-                return (
-                  <div
-                    key={idx}
-                    className="aspect-square bg-zinc-950 border border-zinc-800 rounded flex flex-col items-center justify-center relative overflow-hidden"
-                  >
-                    {champ ? (
-                      <>
-                        <div className="text-[10px] font-bold text-red-500 truncate px-0.5 z-10">{champ.name}</div>
-                        <div className="absolute inset-0 bg-red-950/20" />
-                      </>
-                    ) : (
-                      <HelpCircle className="w-5 h-5 text-zinc-700" />
-                    )}
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
-
-          <Card className={`bg-zinc-900/90 border-zinc-800 ${isUserHome ? 'border-blue-900/30' : 'border-red-900/30'}`}>
-            <CardHeader className="py-3 border-b border-zinc-800 bg-zinc-900">
-              <CardTitle className="text-sm font-bold text-zinc-200">ĐỘI HÌNH RA SÂN</CardTitle>
-            </CardHeader>
-            <CardContent className="py-3 space-y-3">
-              {["TOP", "JUG", "MID", "BOT", "SUP"].map(role => {
-                const champId = userPicks[role];
-                const champ = CHAMPIONS.find(c => c.id === champId);
-                const isActive = activeRole === role;
-
-                // Tướng tương ứng của đối thủ
-                const oppChampId = oppPicks[role];
-                const oppChamp = CHAMPIONS.find(c => c.id === oppChampId);
-
-                // Kiểm tra khắc chế
-                const isUserCounter = champ && oppChamp && champ.counters.includes(oppChamp.id);
-                const isOpponentCounter = champ && oppChamp && oppChamp.counters.includes(champ.id);
-
-                return (
-                  <div
-                    key={role}
-                    className={`flex items-center justify-between p-3 rounded-lg border transition-all ${
-                      isActive
-                        ? "border-blue-500 bg-blue-950/20 shadow-md shadow-blue-950/50"
-                        : champId
-                        ? "border-zinc-850 bg-zinc-950/70"
-                        : "border-zinc-800 bg-zinc-950/30 hover:bg-zinc-900/50 cursor-pointer"
-                    }`}
-                    onClick={() => {
-                      // Chỉ cho phép đổi active role nếu đó là vị trí trống và đang trong lượt pick của người chơi
-                      if (!champId && isUserTurn && currentStep?.type === "PICK") {
-                        setActiveRole(role);
-                      }
-                    }}
-                  >
-                    <div className="flex items-center gap-3">
-                      {champ && championImages?.[champ.id] ? (
-                        <div className="w-14 h-14 rounded overflow-hidden border border-zinc-800 relative z-10 flex-shrink-0">
-                          <img src={championImages[champ.id]} alt={champ.name} className="w-full h-full object-cover" />
-                        </div>
-                      ) : champ ? (
-                        <div className="w-14 h-14 rounded bg-zinc-900 border border-zinc-800 flex items-center justify-center flex-shrink-0">
-                          {champ.type === "Tank" && <Shield className="w-7 h-7 text-blue-400/70" />}
-                          {champ.type === "Fighter" && <Sword className="w-7 h-7 text-orange-400/70" />}
-                          {champ.type === "Assassin" && <Skull className="w-7 h-7 text-purple-400/70" />}
-                          {champ.type === "Mage" && <Flame className="w-7 h-7 text-violet-400/70" />}
-                          {champ.type === "Marksman" && <Target className="w-7 h-7 text-amber-400/70" />}
-                          {champ.type === "Enchanter" && <Wand2 className="w-7 h-7 text-emerald-400/70" />}
-                        </div>
-                      ) : (
-                        <div className="w-14 h-14 rounded bg-zinc-900 border border-zinc-850 flex items-center justify-center font-bold text-xs text-zinc-500 flex-shrink-0">
-                          {role}
-                        </div>
-                      )}
-                      <div>
-                        <div className="text-xs font-semibold text-zinc-555">{role}</div>
-                        <div className="text-sm font-bold text-zinc-200">
-                          {champ ? champ.name : <span className="text-zinc-650 font-medium">Chưa Chọn</span>}
-                        </div>
-                      </div>
-                    </div>
-                    {champ && (
-                      <div className="flex flex-col items-end gap-1">
-                        <Badge className="bg-zinc-850 text-[10px] border-zinc-800 text-zinc-400 font-normal">
-                          {champ.type}
-                        </Badge>
-                        {isUserCounter && (
-                          <Badge className="bg-emerald-950 text-emerald-400 border-emerald-900/50 text-[9px] font-bold px-1.5 py-0">
-                            Khắc chế (+6%)
-                          </Badge>
-                        )}
-                        {isOpponentCounter && (
-                          <Badge className="bg-red-950 text-red-400 border-red-900/50 text-[9px] font-bold px-1.5 py-0">
-                            Bị khắc chế (-6%)
-                          </Badge>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Khu vực giữa: Bảng tướng để chọn */}
-        <div className="lg:col-span-3 space-y-4">
-          <Card className="bg-zinc-900/90 border-zinc-800 flex-grow">
-            <CardHeader className="py-4 border-b border-zinc-800 bg-zinc-900 flex justify-between items-center">
-              <div>
-                <CardTitle className="text-base font-bold text-zinc-200">
-                  {currentStep 
-                    ? (currentStep.type === "BAN" 
-                      ? "DANH SÁCH TƯỚNG CẤM" 
-                      : `CHỌN TƯỚNG CHO VỊ TRÍ: ${activeRole || "HÃY CHỌN VỊ TRÍ"}`)
-                    : "CẤM CHỌN HOÀN TẤT"}
-                </CardTitle>
-                <p className="text-xs text-zinc-500 mt-0.5">
-                  {currentStep 
-                    ? (currentStep.type === "BAN" 
-                      ? "Lượt cấm: Click vào tướng để cấm thi đấu." 
-                      : "Lượt chọn: Click vào tướng hợp lệ để xác nhận.")
-                    : "Tất cả các lượt cấm chọn đã được hoàn tất."}
-                </p>
               </div>
-              <div>
-                {currentStep && (
-                  <Badge className={currentStep.type === "BAN" ? "bg-red-950 text-red-400 border border-red-800/40" : "bg-blue-950 text-blue-400 border border-blue-800/40"}>
-                    {currentStep.type === "BAN" ? "GIAI ĐOẠN CẤM" : "GIAI ĐOẠN CHỌN"}
-                  </Badge>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="py-6">
-              <div className="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-8 gap-3 max-h-[360px] overflow-y-auto pr-2">
-                {CHAMPIONS.map(champ => {
-                  const isUserBanned = userBans.includes(champ.id);
-                  const isOpponentBanned = oppBans.includes(champ.id);
-                  const isBanned = isUserBanned || isOpponentBanned;
-
-                  const isUserPicked = Object.values(userPicks).includes(champ.id);
-                  const isOpponentPicked = Object.values(oppPicks).includes(champ.id);
-                  const isPicked = isUserPicked || isOpponentPicked;
+              <div className="flex gap-2">
+                {[0, 1, 2, 3, 4].map(idx => {
+                  const champId = blueBans[idx];
+                  const champ = CHAMPIONS.find(c => c.id === champId);
                   
-                  const isRoleMatch = currentStep?.type === "PICK" && activeRole && champ.role === activeRole;
-                  const champTier = championTiers[champ.id] || "B";
-
-                  // Lớp CSS màu viền/nền tương ứng với màu phe (Xanh/Đỏ) của người chọn
-                  const userColorClass = isUserHome
-                    ? "border-blue-500 bg-blue-950/30 opacity-70 cursor-not-allowed"
-                    : "border-rose-500 bg-rose-950/30 opacity-70 cursor-not-allowed";
-
-                  const opponentColorClass = isUserHome
-                    ? "border-rose-500 bg-rose-950/30 opacity-70 cursor-not-allowed"
-                    : "border-blue-500 bg-blue-950/30 opacity-70 cursor-not-allowed";
-
                   return (
                     <div
-                      key={champ.id}
-                      className={`relative rounded-lg p-2 border flex flex-col items-center justify-between cursor-pointer transition-all text-center h-[135px] w-full ${
-                        isBanned
-                          ? "border-red-950/85 bg-red-950/15 opacity-40 cursor-not-allowed"
-                          : isUserPicked
-                          ? userColorClass
-                          : isOpponentPicked
-                          ? opponentColorClass
-                          : isRoleMatch
-                          ? "border-emerald-700 bg-emerald-950/20 hover:border-emerald-500"
-                          : "border-zinc-800 bg-zinc-950/80 hover:border-zinc-700"
-                      }`}
-                      onClick={() => handleChampClick(champ)}
+                      key={idx}
+                      className="w-10 h-10 bg-zinc-950/80 border border-zinc-800 rounded relative overflow-hidden flex items-center justify-center"
+                      title={champ ? `Banned: ${champ.name}` : "Empty Ban Slot"}
                     >
-                      <div className="flex justify-between items-center w-full px-0.5">
-                        <span className="text-[9px] text-zinc-500 font-bold uppercase">{champ.role}</span>
-                        <span className={`text-[9px] font-extrabold px-1 rounded bg-black/60 ${
-                          champTier === "S" ? "text-rose-400" :
-                          champTier === "A" ? "text-amber-400" :
-                          champTier === "B" ? "text-blue-400" :
-                          champTier === "C" ? "text-emerald-400" : "text-slate-400"
-                        }`}>{champTier}</span>
-                      </div>
-                      
-                      {championImages?.[champ.id] ? (
-                        <div className="w-16 h-16 rounded-lg overflow-hidden border border-zinc-800 my-0.5 relative z-10 shadow-md">
-                          <img src={championImages[champ.id]} alt={champ.name} className="w-full h-full object-cover" />
-                        </div>
+                      {champ ? (
+                        <>
+                          <img src={getChampionIconUrl(champ.id)} alt={champ.name} className="w-full h-full object-cover grayscale opacity-60" />
+                          <div className="absolute inset-0 bg-red-950/20" />
+                          {/* Red ban slash */}
+                          <div className="absolute w-[140%] h-[2px] bg-red-600 rotate-45 transform origin-center" />
+                        </>
                       ) : (
-                        <div className="flex items-center justify-center w-16 h-16 rounded-lg bg-zinc-900 border border-zinc-800 my-0.5 relative z-10 shadow-md">
-                          {champ.type === "Tank" && <Shield className="w-9 h-9 text-blue-400/70" />}
-                          {champ.type === "Fighter" && <Sword className="w-9 h-9 text-orange-400/70" />}
-                          {champ.type === "Assassin" && <Skull className="w-9 h-9 text-purple-400/70" />}
-                          {champ.type === "Mage" && <Flame className="w-9 h-9 text-violet-400/70" />}
-                          {champ.type === "Marksman" && <Target className="w-9 h-9 text-amber-400/70" />}
-                          {champ.type === "Enchanter" && <Wand2 className="w-9 h-9 text-emerald-400/70" />}
-                        </div>
-                      )}
-                      
-                      <div className="text-[10px] font-bold text-zinc-200 leading-tight">{champ.name}</div>
-                      
-                      <div className="w-full mt-0.5">
-                        <span className={`text-[10px] font-black px-2 py-0.25 rounded-sm block w-full shadow-sm text-center select-none ${
-                          champTier === "S" ? "bg-rose-600/90 text-white" :
-                          champTier === "A" ? "bg-orange-500/95 text-white" :
-                          champTier === "B" ? "bg-amber-500/95 text-white" :
-                          champTier === "C" ? "bg-emerald-500/95 text-white" :
-                          champTier === "D" ? "bg-cyan-500/95 text-white" :
-                          "bg-blue-600/95 text-white"
-                        }`}>
-                          Tier {champTier}
-                        </span>
-                      </div>
-
-                      {isBanned && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/75 rounded-lg">
-                          <XCircle className="w-6 h-6 text-red-600 mb-0.5" />
-                          <span className="text-[8px] font-black text-red-500 uppercase tracking-wider">
-                            {isUserBanned ? "Bạn Cấm" : "Địch Cấm"}
-                          </span>
-                        </div>
-                      )}
-                      
-                      {!isBanned && isOpponentPicked && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 rounded-lg">
-                          <span className={`text-[9px] font-black uppercase px-1 py-0.5 rounded border ${
-                            isUserHome 
-                              ? "text-rose-450 bg-rose-950/80 border-rose-900/30" 
-                              : "text-blue-400 bg-blue-950/80 border-blue-900/30"
-                          }`}>
-                            Đã Chọn (Địch)
-                          </span>
-                        </div>
-                      )}
-
-                      {!isBanned && isUserPicked && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 rounded-lg">
-                          <span className={`text-[9px] font-black uppercase px-1 py-0.5 rounded border ${
-                            isUserHome 
-                              ? "text-blue-400 bg-blue-950/80 border-blue-900/30" 
-                              : "text-rose-450 bg-rose-950/80 border-rose-900/30"
-                          }`}>
-                            Đã Chọn (Ta)
-                          </span>
+                        <div className="w-full h-full border-[1px] border-dashed border-zinc-800 flex items-center justify-center">
+                          <span className="text-[10px] text-zinc-700">/</span>
                         </div>
                       )}
                     </div>
                   );
                 })}
               </div>
+            </div>
 
-              {/* Thông tin tướng được chọn */}
-              {currentStep?.type === "PICK" && activeRole && userPicks[activeRole] && (() => {
-                const selectedChamp = CHAMPIONS.find(c => c.id === userPicks[activeRole]);
-                const selectedChampTier = selectedChamp ? (championTiers[selectedChamp.id] || "B") : "B";
-                
-                const oppChampId = oppPicks[activeRole];
-                const oppChamp = CHAMPIONS.find(c => c.id === oppChampId);
-
-                const isCountering = selectedChamp && oppChamp && selectedChamp.counters.includes(oppChamp.id);
-                const isCountered = selectedChamp && oppChamp && oppChamp.counters.includes(selectedChamp.id);
-
-                return (
-                  <div className="mt-6 p-4 bg-zinc-950 rounded-lg border border-zinc-800 text-xs flex items-start gap-3">
-                    <Info className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
-                    <div className="flex-grow">
-                      <div className="flex justify-between items-center flex-wrap gap-2">
-                        <h4 className="font-bold text-zinc-300">
-                          Tướng được chọn: {selectedChamp?.name} ({activeRole}) - <span className="text-emerald-400 font-extrabold">Tier {selectedChampTier}</span>
-                        </h4>
-                        
-                        {isCountering && (
-                          <span className="bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded">
-                            Lợi thế: Khắc chế đối thủ (+6.0% sức mạnh)
-                          </span>
-                        )}
-                        {isCountered && (
-                          <span className="bg-red-950 text-red-400 border border-red-800 text-[10px] font-bold px-2 py-0.5 rounded">
-                            Bất lợi: Bị đối thủ khắc chế (-6.0% sức mạnh)
-                          </span>
-                        )}
-                      </div>
-                      
-                      <div className="text-zinc-500 mt-2">
-                        Khắc chế các tướng: {selectedChamp?.counters.join(", ") || "Không có"}. 
-                        {oppChamp ? (
-                          <>
-                            <br className="my-1"/>
-                            Đối thủ ở lane này đã chọn: <span className="text-zinc-300 font-bold">{oppChamp.name}</span>.
-                            {isCountering && ` Tướng của bạn (${selectedChamp?.name}) khắc chế cứng ${oppChamp.name}, bạn sẽ nhận +6.0% sức mạnh đi đường!`}
-                            {isCountered && ` Tướng đối phương (${oppChamp.name}) khắc chế cứng bạn, bạn bị phạt -6.0% sức mạnh đi đường!`}
-                            {!isCountering && !isCountered && ` Đây là kèo đấu cân bằng, không có buff khắc chế.`}
-                          </>
-                        ) : (
-                          " Đang chờ đối phương lộ diện hoặc bạn có thể cấm chọn trước."
-                        )}
-                      </div>
+            {/* Center Box: Glassmorphic Selector (Only shows when drafting) */}
+            <div className="flex-grow max-w-xl bg-zinc-950/80 backdrop-blur-md border border-zinc-800 rounded-xl p-4 shadow-2xl flex flex-col self-center min-h-[300px]">
+              {currentStepIndex < DRAFT_STEPS.length ? (
+                <>
+                  {/* Selector Header */}
+                  <div className="flex items-center justify-between gap-3 mb-3 border-b border-zinc-800 pb-2.5">
+                    <span className="text-xs font-black text-zinc-300 uppercase tracking-widest flex items-center gap-1.5">
+                      {currentStep?.type === "BAN" ? (
+                        <>
+                          <XCircle className="w-4 h-4 text-red-500" />
+                          <span>Chọn tướng muốn CẤM</span>
+                        </>
+                      ) : (
+                        <>
+                          {renderRoleIcon(activeRole || "ALL", "w-4 h-4 text-emerald-400")}
+                          <span>Chọn tướng cho vai trò: <strong className="text-emerald-400 font-black">{activeRole}</strong></span>
+                        </>
+                      )}
+                    </span>
+                    
+                    {/* Search Bar */}
+                    <div className="relative w-44">
+                      <Search className="absolute left-2 top-2 w-3.5 h-3.5 text-zinc-500" />
+                      <input
+                        type="text"
+                        placeholder="Tìm tướng..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full bg-zinc-900 border border-zinc-800 text-xs px-8 py-1.5 rounded text-zinc-200 outline-none focus:border-zinc-700 transition"
+                      />
                     </div>
                   </div>
-                );
-              })()}
-            </CardContent>
-          </Card>
 
-          {/* Bảng nút Xác nhận */}
-          <div className="flex justify-end items-center gap-4 bg-zinc-900 border border-zinc-800 p-4 rounded-xl shadow-lg">
-            <div className="text-xs text-zinc-400">
-              {!isValid && (
-                <span>Đang trong giai đoạn cấm chọn. Hãy hoàn thành tất cả các lượt để tiếp tục.</span>
+                  {/* Role Tabs */}
+                  <div className="flex gap-1.5 mb-3 overflow-x-auto pb-1">
+                    {["ALL", "TOP", "JUG", "MID", "BOT", "SUP"].map(role => (
+                      <button
+                        key={role}
+                        onClick={() => setSelectedRoleFilter(role)}
+                        className={`px-3 py-1 rounded text-[10px] font-bold tracking-wider flex items-center gap-1 border transition-all ${
+                          selectedRoleFilter === role
+                            ? "bg-emerald-950 border-emerald-500 text-emerald-400 shadow-md shadow-emerald-950/30"
+                            : "bg-zinc-900/40 border-zinc-850 text-zinc-400 hover:text-zinc-250 hover:bg-zinc-900"
+                        }`}
+                      >
+                        {role !== "ALL" && renderRoleIcon(role, "w-3 h-3")}
+                        <span>{role}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Champion Grid */}
+                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-[175px] overflow-y-auto pr-1">
+                    {filteredChampions.map(champ => {
+                      const isBlueBanned = blueBans.includes(champ.id);
+                      const isRedBanned = redBans.includes(champ.id);
+                      const isBanned = isBlueBanned || isRedBanned;
+
+                      const isBluePicked = Object.values(bluePicks).includes(champ.id);
+                      const isRedPicked = Object.values(redPicks).includes(champ.id);
+                      const isPicked = isBluePicked || isRedPicked;
+
+                      const champTier = championTiers[champ.id] || "B";
+                      
+                      return (
+                        <div
+                          key={champ.id}
+                          className={`relative rounded p-1.5 border flex flex-col items-center justify-between cursor-pointer transition h-[84px] text-center select-none ${
+                            isBanned
+                              ? "border-red-950/40 bg-red-950/5 opacity-30 cursor-not-allowed"
+                              : isPicked
+                              ? "border-zinc-850 bg-zinc-950 opacity-40 cursor-not-allowed"
+                              : (currentStep?.type === "PICK" && activeRole && champ.role === activeRole)
+                              ? "border-emerald-600 bg-emerald-950/20 hover:border-emerald-400"
+                              : "border-zinc-850 bg-zinc-900/30 hover:border-zinc-700"
+                          }`}
+                          onClick={() => handleChampClick(champ)}
+                        >
+                          {/* Top Tag & Tier */}
+                          <div className="flex justify-between items-center w-full px-0.5 text-[8px] font-bold text-zinc-500">
+                            <span>{champ.role}</span>
+                            <span className={
+                              champTier === "S" ? "text-rose-400" :
+                              champTier === "A" ? "text-amber-400" :
+                              champTier === "B" ? "text-blue-400" : "text-zinc-500"
+                            }>{champTier}</span>
+                          </div>
+
+                          {/* Image */}
+                          <div className="w-9 h-9 rounded overflow-hidden border border-zinc-850 my-1">
+                            <img src={getChampionIconUrl(champ.id)} alt={champ.name} className="w-full h-full object-cover" />
+                          </div>
+
+                          {/* Name */}
+                          <div className="text-[9px] font-bold text-zinc-300 truncate w-full">{champ.name}</div>
+
+                          {/* Overlay Mask for state */}
+                          {isBanned && (
+                            <div className="absolute inset-0 bg-red-950/60 flex items-center justify-center rounded">
+                              <span className="text-[8px] font-black text-red-400 tracking-tighter">BANNED</span>
+                            </div>
+                          )}
+                          {!isBanned && isPicked && (
+                            <div className="absolute inset-0 bg-zinc-950/60 flex items-center justify-center rounded">
+                              <span className="text-[8px] font-black text-zinc-500 tracking-tighter">LOCKED</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {filteredChampions.length === 0 && (
+                      <div className="col-span-full py-8 text-center text-xs text-zinc-500 flex flex-col items-center gap-1.5">
+                        <AlertTriangle className="w-4 h-4 text-zinc-600" />
+                        <span>Không tìm thấy tướng nào phù hợp.</span>
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                // When draft is completed, show play confirmation
+                <div className="flex-grow flex flex-col items-center justify-center text-center p-6 animate-fade-in">
+                  <div className="w-12 h-12 rounded-full bg-emerald-950 border border-emerald-500 flex items-center justify-center mb-3 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+                    <Play className="w-5 h-5 text-emerald-400 fill-emerald-400/20" />
+                  </div>
+                  <h3 className="text-lg font-black text-zinc-150 uppercase tracking-widest">Đội Hình Đã Sẵn Sàng</h3>
+                  <p className="text-zinc-400 text-xs mt-1 max-w-sm">
+                    Tất cả các lượt cấm/chọn đã được chốt. Nhấn nút bên dưới để tiến hành cấm chọn chiến thuật và thi đấu.
+                  </p>
+                  
+                  <Button
+                    className="bg-emerald-600 hover:bg-emerald-500 hover:scale-105 active:scale-95 text-white font-bold px-10 py-5 rounded-lg text-xs tracking-wider uppercase mt-5 shadow-lg shadow-emerald-950/40 transition-all duration-200"
+                    onClick={handleSubmit}
+                    disabled={isPending}
+                  >
+                    {isPending ? "Đang Khởi Chạy..." : "Xác Nhận & Thi Đấu"}
+                  </Button>
+                </div>
               )}
-              {isValid && <span className="text-emerald-400 font-semibold">Đội hình sẵn sàng! Bấm nút bên phải để bắt đầu trận đấu.</span>}
             </div>
-            <Button
-              className="bg-emerald-600 hover:bg-emerald-500 font-bold px-8 py-5 rounded-lg text-sm flex items-center gap-2 shadow-lg shadow-emerald-900/30"
-              onClick={handleSubmit}
-              disabled={!isValid || isPending}
-            >
-              <Play className="w-4 h-4 fill-zinc-100" />
-              Xác Nhận & Thi Đấu
-            </Button>
+
+            {/* Right Box: Red Bans */}
+            <div className="flex flex-col items-end bg-black/40 border border-red-900/20 rounded-lg p-3 backdrop-blur-sm w-[260px] shadow-lg">
+              <div className="flex items-center gap-2 mb-2 flex-row-reverse text-right">
+                <TeamLogo teamName={awayTeamName} size={32} />
+                <div>
+                  <h4 className="text-xs font-black text-red-400 tracking-wider">RED BANS</h4>
+                  <p className="text-[10px] text-zinc-500 font-medium font-mono">Dplus KIA</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                {[0, 1, 2, 3, 4].map(idx => {
+                  const champId = redBans[idx];
+                  const champ = CHAMPIONS.find(c => c.id === champId);
+                  
+                  return (
+                    <div
+                      key={idx}
+                      className="w-10 h-10 bg-zinc-950/80 border border-zinc-800 rounded relative overflow-hidden flex items-center justify-center"
+                      title={champ ? `Banned: ${champ.name}` : "Empty Ban Slot"}
+                    >
+                      {champ ? (
+                        <>
+                          <img src={getChampionIconUrl(champ.id)} alt={champ.name} className="w-full h-full object-cover grayscale opacity-60" />
+                          <div className="absolute inset-0 bg-red-950/20" />
+                          {/* Red ban slash */}
+                          <div className="absolute w-[140%] h-[2px] bg-red-600 rotate-45 transform origin-center" />
+                        </>
+                      ) : (
+                        <div className="w-full h-full border-[1px] border-dashed border-zinc-800 flex items-center justify-center">
+                          <span className="text-[10px] text-zinc-700">/</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+          </div>
+
+          {/* Bottom Area (Reserved for layout spacing) */}
+          <div className="h-2" />
+
+        </div>
+      </div>
+
+      {/* 2. BOTTOM HORIZONTAL LCK PICKS BAR */}
+      <div className="w-full bg-zinc-950 border-t border-zinc-900 flex flex-row items-stretch justify-between h-56 text-zinc-150 relative z-20">
+        
+        {/* Left Side: BLUE TEAM PICKS (5 Slots) */}
+        <div className="w-[38%] flex flex-row items-stretch select-none">
+          {["TOP", "JUG", "MID", "BOT", "SUP"].map((role) => {
+            const champId = bluePicks[role];
+            const champ = CHAMPIONS.find(c => c.id === champId);
+            const isPicking = activeBlueRole === role;
+            const playerName = getPlayerNameByRole(bluePlayers, role);
+            
+            // Check counters info if both picked
+            const oppChampId = redPicks[role];
+            const oppChamp = CHAMPIONS.find(c => c.id === oppChampId);
+            const isCountering = champ && oppChamp && champ.counters.includes(oppChamp.id);
+            const isCountered = champ && oppChamp && oppChamp.counters.includes(champ.id);
+
+            return (
+              <div
+                key={role}
+                className={`flex-1 border-r border-zinc-900 relative group flex flex-col justify-end p-3 transition-all duration-300 ${
+                  isPicking ? 'bg-blue-950/20 ring-1 ring-blue-500/50 ring-inset' : 'bg-zinc-950'
+                }`}
+              >
+                {/* Background vertical splash art */}
+                {champ ? (
+                  <>
+                    <img 
+                      src={getChampionSplashUrl(champ.id)} 
+                      alt={champ.name}
+                      className="absolute inset-0 w-full h-full object-cover object-top transition-transform duration-500 group-hover:scale-105"
+                    />
+                    {/* Bottom gradient mask for readability */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent z-0" />
+                  </>
+                ) : (
+                  // Empty slot background
+                  <div className="absolute inset-0 flex items-center justify-center z-0 bg-zinc-950">
+                    <div className="opacity-10 text-zinc-500">
+                      {renderRoleIcon(role, "w-10 h-10")}
+                    </div>
+                  </div>
+                )}
+
+                {/* Active pick glow border */}
+                {isPicking && (
+                  <div className="absolute inset-0 border-t-2 border-blue-500 shadow-[inset_0_0_15px_rgba(59,130,246,0.25)] animate-pulse z-10" />
+                )}
+
+                {/* Text details */}
+                <div className="z-10 flex flex-col select-none relative">
+                  {/* Flashing picking state */}
+                  {isPicking && (
+                    <span className="text-[9px] font-black text-blue-400 tracking-widest uppercase animate-pulse mb-1">
+                      PICKING...
+                    </span>
+                  )}
+
+                  {/* Counter badge tag */}
+                  {!isPicking && isCountering && (
+                    <span className="text-[8px] font-black tracking-wider text-emerald-400 bg-emerald-950/90 border border-emerald-500/30 rounded px-1.5 py-0.5 w-fit mb-1.5">
+                      COUNTER (+6%)
+                    </span>
+                  )}
+                  {!isPicking && isCountered && (
+                    <span className="text-[8px] font-black tracking-wider text-red-400 bg-red-950/90 border border-red-500/30 rounded px-1.5 py-0.5 w-fit mb-1.5">
+                      COUNTERED (-6%)
+                    </span>
+                  )}
+
+                  {/* Role Icon & Player Name */}
+                  <div className="flex items-center gap-1 text-zinc-400 mb-0.5">
+                    {renderRoleIcon(role, "w-3 h-3 text-zinc-550")}
+                    <span className="text-[9px] font-bold tracking-widest text-zinc-500 uppercase">{role}</span>
+                  </div>
+
+                  <h3 className="text-sm font-black text-zinc-100 tracking-tight truncate leading-tight uppercase">
+                    {playerName}
+                  </h3>
+
+                  <p className="text-[10px] font-bold text-zinc-400 mt-0.5 truncate leading-tight uppercase font-mono">
+                    {champ ? champ.name : "Chưa Chọn"}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Middle Section: CENTER MATCH INFO PANEL */}
+        <div className="w-[24%] bg-zinc-950/95 flex flex-col items-center justify-between py-3.5 px-5 border-r border-l border-zinc-900 text-center relative overflow-hidden">
+          {/* Subtle background glow */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-40 h-20 rounded-full bg-indigo-950/15 blur-2xl pointer-events-none" />
+
+          {/* Date & Week Header */}
+          <div className="flex flex-col items-center text-center">
+            <span className="text-[8px] tracking-[0.25em] text-zinc-500 font-black uppercase font-mono">
+              2026 LCK SUMMER
+            </span>
+            <span className="text-[9px] tracking-wider text-zinc-400 font-bold font-mono mt-0.5">
+              WEEK {currentWeek} • {currentDate}
+            </span>
+          </div>
+
+          {/* Teams and Logos VS Row */}
+          <div className="flex items-center justify-between w-full px-2">
+            {/* Blue Logo */}
+            <div className="flex flex-col items-center gap-1.5 flex-1">
+              <TeamLogo teamName={homeTeamName} size={42} />
+              <span className="text-[10px] font-black text-zinc-350 tracking-wider font-mono">
+                {bluePlayers.length > 0 ? `${homeWins}W-${homeLosses}L` : "0W-0L"}
+              </span>
+            </div>
+
+            {/* VS text */}
+            <div className="flex flex-col items-center justify-center px-2">
+              <span className="text-[11px] font-black text-zinc-500 tracking-widest italic uppercase">
+                VS
+              </span>
+              <div className="h-[1px] w-6 bg-zinc-800 my-1" />
+              <span className="text-[9px] font-black text-zinc-550 uppercase">
+                BO1
+              </span>
+            </div>
+
+            {/* Red Logo */}
+            <div className="flex flex-col items-center gap-1.5 flex-1">
+              <TeamLogo teamName={awayTeamName} size={42} />
+              <span className="text-[10px] font-black text-zinc-350 tracking-wider font-mono">
+                {redPlayers.length > 0 ? `${awayWins}W-${awayLosses}L` : "0W-0L"}
+              </span>
+            </div>
+          </div>
+
+          {/* Live Turn indicator */}
+          <div className="flex flex-col items-center">
+            <div className="h-[2px] w-12 rounded bg-zinc-800 mb-1.5" />
+            <span className="text-[8px] font-black text-zinc-600 tracking-widest font-mono uppercase">
+              PATCH 26.10
+            </span>
           </div>
         </div>
 
-        {/* Cột phải: Lượt cấm & Chọn của đối thủ */}
-        <div className="lg:col-span-1 space-y-4">
-          <Card className={`bg-zinc-900/90 border-zinc-800 ${!isUserHome ? 'border-blue-900/30' : 'border-red-900/30'}`}>
-            <CardHeader className="py-3 border-b border-zinc-800 bg-zinc-900">
-              <CardTitle className="text-sm font-bold flex items-center justify-between text-zinc-200">
-                <div className="flex items-center gap-2">
-                  <TeamLogo teamName={opponentTeamName} size={36} />
-                  <span>CẤM ĐỐI THỦ ({oppBans.length}/5)</span>
-                </div>
-                {!isUserTurn && currentStep?.type === "BAN" && (
-                  <Badge className="bg-rose-600 animate-pulse text-[10px]">Đang Cấm</Badge>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="py-4 grid grid-cols-5 gap-2">
-              {[0, 1, 2, 3, 4].map(idx => {
-                const champId = oppBans[idx];
-                const champ = CHAMPIONS.find(c => c.id === champId);
-                return (
-                  <div
-                    key={idx}
-                    className="aspect-square bg-zinc-950 border border-zinc-850 rounded flex flex-col items-center justify-center relative overflow-hidden"
-                  >
-                    {champ ? (
-                      <>
-                        <div className="text-[10px] font-bold text-red-500 truncate px-0.5 z-10">{champ.name}</div>
-                        <div className="absolute inset-0 bg-red-950/20" />
-                      </>
-                    ) : (
-                      <HelpCircle className="w-5 h-5 text-zinc-800" />
-                    )}
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
+        {/* Right Side: RED TEAM PICKS (5 Slots) */}
+        <div className="w-[38%] flex flex-row items-stretch select-none">
+          {["TOP", "JUG", "MID", "BOT", "SUP"].map((role) => {
+            const champId = redPicks[role];
+            const champ = CHAMPIONS.find(c => c.id === champId);
+            const isPicking = activeRedRole === role;
+            const playerName = getPlayerNameByRole(redPlayers, role);
 
-          <Card className={`bg-zinc-900/90 border-zinc-800 ${!isUserHome ? 'border-blue-900/30' : 'border-red-900/30'}`}>
-            <CardHeader className="py-3 border-b border-zinc-800 bg-zinc-900">
-              <CardTitle className="text-sm font-bold text-zinc-200">ĐỘI HÌNH ĐỐI THỦ</CardTitle>
-            </CardHeader>
-            <CardContent className="py-3 space-y-3">
-              {["TOP", "JUG", "MID", "BOT", "SUP"].map(role => {
-                const champId = oppPicks[role];
-                const champ = CHAMPIONS.find(c => c.id === champId);
+            // Check counters info if both picked
+            const oppChampId = bluePicks[role];
+            const oppChamp = CHAMPIONS.find(c => c.id === oppChampId);
+            const isCountering = champ && oppChamp && champ.counters.includes(oppChamp.id);
+            const isCountered = champ && oppChamp && oppChamp.counters.includes(champ.id);
 
-                // Tướng tương ứng của người chơi để tính khắc chế theo góc nhìn của địch
-                const userChampId = userPicks[role];
-                const userChamp = CHAMPIONS.find(c => c.id === userChampId);
-
-                const isOpponentCounter = champ && userChamp && champ.counters.includes(userChamp.id);
-                const isUserCounter = champ && userChamp && userChamp.counters.includes(champ.id);
-
-                return (
-                  <div
-                    key={role}
-                    className="flex items-center justify-between p-3 rounded-lg border border-zinc-850 bg-zinc-950/30"
-                  >
-                    <div className="flex items-center gap-3">
-                      {champ && championImages?.[champ.id] ? (
-                        <div className="w-14 h-14 rounded overflow-hidden border border-zinc-800 relative z-10 flex-shrink-0">
-                          <img src={championImages[champ.id]} alt={champ.name} className="w-full h-full object-cover" />
-                        </div>
-                      ) : champ ? (
-                        <div className="w-14 h-14 rounded bg-zinc-900 border border-zinc-800 flex items-center justify-center flex-shrink-0">
-                          {champ.type === "Tank" && <Shield className="w-7 h-7 text-blue-400/70" />}
-                          {champ.type === "Fighter" && <Sword className="w-7 h-7 text-orange-400/70" />}
-                          {champ.type === "Assassin" && <Skull className="w-7 h-7 text-purple-400/70" />}
-                          {champ.type === "Mage" && <Flame className="w-7 h-7 text-violet-400/70" />}
-                          {champ.type === "Marksman" && <Target className="w-7 h-7 text-amber-400/70" />}
-                          {champ.type === "Enchanter" && <Wand2 className="w-7 h-7 text-emerald-400/70" />}
-                        </div>
-                      ) : (
-                        <div className="w-14 h-14 rounded bg-zinc-900 border border-zinc-800 flex items-center justify-center font-bold text-xs text-zinc-550 flex-shrink-0">
-                          {role}
-                        </div>
-                      )}
-                      <div>
-                        <div className="text-xs font-semibold text-zinc-500">{role}</div>
-                        <div className="text-sm font-bold text-zinc-300">
-                          {champ ? champ.name : <span className="text-zinc-650 font-medium">Chưa Chọn</span>}
-                        </div>
-                      </div>
+            return (
+              <div
+                key={role}
+                className={`flex-1 border-r border-zinc-900 last:border-none relative group flex flex-col justify-end p-3 transition-all duration-300 ${
+                  isPicking ? 'bg-red-950/20 ring-1 ring-red-500/50 ring-inset' : 'bg-zinc-950'
+                }`}
+              >
+                {/* Background vertical splash art */}
+                {champ ? (
+                  <>
+                    <img 
+                      src={getChampionSplashUrl(champ.id)} 
+                      alt={champ.name}
+                      className="absolute inset-0 w-full h-full object-cover object-top transition-transform duration-500 group-hover:scale-105"
+                    />
+                    {/* Bottom gradient mask for readability */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent z-0" />
+                  </>
+                ) : (
+                  // Empty slot background
+                  <div className="absolute inset-0 flex items-center justify-center z-0 bg-zinc-950">
+                    <div className="opacity-10 text-zinc-500">
+                      {renderRoleIcon(role, "w-10 h-10")}
                     </div>
-                    {champ && (
-                      <div className="flex flex-col items-end gap-1">
-                        <Badge className="bg-zinc-800 text-[10px] border-zinc-700 text-zinc-400 font-normal">
-                          {champ.type}
-                        </Badge>
-                        {isOpponentCounter && (
-                          <Badge className="bg-emerald-950 text-emerald-400 border-emerald-900/50 text-[9px] font-bold px-1.5 py-0">
-                            Khắc chế (+6%)
-                          </Badge>
-                        )}
-                        {isUserCounter && (
-                          <Badge className="bg-red-950 text-red-400 border-red-900/50 text-[9px] font-bold px-1.5 py-0">
-                            Bị khắc chế (-6%)
-                          </Badge>
-                        )}
-                      </div>
-                    )}
                   </div>
-                );
-              })}
-            </CardContent>
-          </Card>
+                )}
+
+                {/* Active pick glow border */}
+                {isPicking && (
+                  <div className="absolute inset-0 border-t-2 border-red-500 shadow-[inset_0_0_15px_rgba(239,68,68,0.25)] animate-pulse z-10" />
+                )}
+
+                {/* Text details */}
+                <div className="z-10 flex flex-col select-none relative">
+                  {/* Flashing picking state */}
+                  {isPicking && (
+                    <span className="text-[9px] font-black text-red-400 tracking-widest uppercase animate-pulse mb-1">
+                      PICKING...
+                    </span>
+                  )}
+
+                  {/* Counter badge tag */}
+                  {!isPicking && isCountering && (
+                    <span className="text-[8px] font-black tracking-wider text-emerald-400 bg-emerald-950/90 border border-emerald-500/30 rounded px-1.5 py-0.5 w-fit mb-1.5">
+                      COUNTER (+6%)
+                    </span>
+                  )}
+                  {!isPicking && isCountered && (
+                    <span className="text-[8px] font-black tracking-wider text-red-400 bg-red-950/90 border border-red-500/30 rounded px-1.5 py-0.5 w-fit mb-1.5">
+                      COUNTERED (-6%)
+                    </span>
+                  )}
+
+                  {/* Role Icon & Player Name */}
+                  <div className="flex items-center gap-1 text-zinc-400 mb-0.5">
+                    {renderRoleIcon(role, "w-3 h-3 text-zinc-555")}
+                    <span className="text-[9px] font-bold tracking-widest text-zinc-500 uppercase">{role}</span>
+                  </div>
+
+                  <h3 className="text-sm font-black text-zinc-100 tracking-tight truncate leading-tight uppercase">
+                    {playerName}
+                  </h3>
+
+                  <p className="text-[10px] font-bold text-zinc-400 mt-0.5 truncate leading-tight uppercase font-mono">
+                    {champ ? champ.name : "Chưa Chọn"}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
         </div>
+
       </div>
+
     </div>
   );
 }

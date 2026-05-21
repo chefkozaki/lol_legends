@@ -2,8 +2,9 @@
 
 import React, { useState, useTransition, useEffect } from "react";
 import { advanceDayAction, readMailAction, signFreeAgentAction, releasePlayerAction, submitDraftAndPlayAction } from "@/lib/game/actions";
+import { MatchSimulationResult } from "@/lib/game/engine";
 import { logoutAction } from "@/lib/game/authActions";
-import { adminUpdatePlayerAction, adminUpdateTeamAction, adminGetUsersAction, adminDeleteUserAction, adminCreateTeamAction, adminCreatePlayerAction, adminUpdateChampionTiersAction } from "@/lib/game/adminActions";
+import { adminUpdatePlayerAction, adminUpdateTeamAction, adminGetUsersAction, adminDeleteUserAction, adminCreateTeamAction, adminCreatePlayerAction, adminUpdateChampionTiersAction, adminSendGlobalMailAction } from "@/lib/game/adminActions";
 import { CHAMPIONS } from "@/lib/game/champions";
 import PlayerRadarChart from "./PlayerRadarChart";
 import DraftScreen from "./DraftScreen";
@@ -40,7 +41,9 @@ import {
   Sliders,
   Flag,
   UserCheck,
-  Database
+  Database,
+  Trophy,
+  Send
 } from "lucide-react";
 
 interface Player {
@@ -106,6 +109,31 @@ interface GameState {
   dayOfSeason: number;
   week: number;
   userTeamId: string | null;
+  seasonState: string;
+}
+
+function getSeasonStateLabel(state: string): string {
+  const mapping: Record<string, string> = {
+    FIRST_STAND_QF: "First Stand - Tứ Kết",
+    FIRST_STAND_SF: "First Stand - Bán Kết",
+    FIRST_STAND_F: "First Stand - Chung Kết",
+    REGIONAL_SEASON: "Mùa Giải Khu Vực",
+    REGIONAL_REGULAR: "Vòng Bảng Khu Vực",
+    REGIONAL_PLAYOFF_SF: "Playoffs Khu Vực - Bán Kết",
+    REGIONAL_PLAYOFF_F: "Playoffs Khu Vực - Chung Kết",
+    MSI_GROUPS: "MSI - Vòng Bảng",
+    MSI_PLAYOFF_SF: "MSI - Bán Kết",
+    MSI_PLAYOFF_F: "MSI - Chung Kết",
+    EWC_QF: "EWC - Tứ Kết",
+    EWC_SF: "EWC - Bán Kết",
+    EWC_F: "EWC - Chung Kết",
+    WORLDS_GROUPS: "Worlds - Vòng Bảng",
+    WORLDS_PLAYOFF_QF: "Worlds - Tứ Kết",
+    WORLDS_PLAYOFF_SF: "Worlds - Bán Kết",
+    WORLDS_PLAYOFF_F: "Worlds - Chung Kết",
+    OFF_SEASON: "Kỳ Chuyển Nhượng"
+  };
+  return mapping[state] || state;
 }
 
 interface GameDashboardProps {
@@ -142,7 +170,10 @@ export default function GameDashboard({
 }: GameDashboardProps) {
   const [activeTab, setActiveTab] = useState<string>("inbox");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
-  const [selectedMail, setSelectedMail] = useState<Mail | null>(allMails[0] || null);
+  const [selectedMailId, setSelectedMailId] = useState<string | null>(allMails[0]?.id || null);
+  const selectedMail = allMails.find(m => m.id === selectedMailId) || allMails[0] || null;
+  const [autoMarkRead, setAutoMarkRead] = useState<boolean>(true);
+
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   
   // Champion Tiers State
@@ -174,7 +205,7 @@ export default function GameDashboard({
   // Quản lý trạng thái Match Day
   const [matchDayState, setMatchDayState] = useState<{ matchId: string; date: string } | null>(null);
   const [draftMode, setDraftMode] = useState<boolean>(false);
-  const [matchResult, setMatchResult] = useState<any | null>(null);
+  const [matchResult, setMatchResult] = useState<MatchSimulationResult | null>(null);
 
   const [isPending, startTransition] = useTransition();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -227,8 +258,26 @@ export default function GameDashboard({
     logoUrl: "",
   });
 
-  const [adminUsers, setAdminUsers] = useState<any[]>([]);
+  const [adminUsers, setAdminUsers] = useState<{
+    id: string;
+    username: string;
+    displayName: string;
+    role: string;
+    createdAt: string | Date;
+    _count: {
+      teams: number;
+      mails: number;
+    };
+  }[]>([]);
   const [loadingUsers, setLoadingUsers] = useState<boolean>(false);
+
+  // Trạng thái cho form gửi thư toàn server
+  const [adminMailForm, setAdminMailForm] = useState({
+    title: "",
+    sender: "Ban Quản Trị LL26",
+    content: "",
+    category: "GENERAL"
+  });
 
   // Gom toàn bộ tuyển thủ trong Save Game để Admin chỉnh sửa
   const allPlayersInSaveGame = [
@@ -243,21 +292,23 @@ export default function GameDashboard({
     if (adminSelectedPlayerId && adminPlayerMode === "edit") {
       const p = allPlayersInSaveGame.find(x => x.id === adminSelectedPlayerId);
       if (p) {
-        setAdminPlayerForm({
-          name: p.name,
-          role: p.role,
-          age: p.age,
-          nationality: p.nationality,
-          laning: p.laning,
-          teamfight: p.teamfight,
-          macro: p.macro,
-          mentality: p.mentality,
-          championPool: p.championPool,
-          salary: p.salary,
-          value: p.value,
-          avatarUrl: (p as any).avatarUrl || "",
-        });
-        setAdminPlayerTeamId(p.teamId || "free");
+        setTimeout(() => {
+          setAdminPlayerForm({
+            name: p.name,
+            role: p.role,
+            age: p.age,
+            nationality: p.nationality,
+            laning: p.laning,
+            teamfight: p.teamfight,
+            macro: p.macro,
+            mentality: p.mentality,
+            championPool: p.championPool,
+            salary: p.salary,
+            value: p.value,
+            avatarUrl: p.avatarUrl || "",
+          });
+          setAdminPlayerTeamId(p.teamId || "free");
+        }, 0);
       }
     }
   }, [adminSelectedPlayerId, adminPlayerMode]);
@@ -267,14 +318,16 @@ export default function GameDashboard({
     if (adminSelectedTeamId && adminTeamMode === "edit") {
       const t = allTeamsInRegion.find(x => x.id === adminSelectedTeamId);
       if (t) {
-        setAdminTeamForm({
-          budget: t.budget,
-          salaryCap: t.salaryCap,
-          wins: t.wins,
-          losses: t.losses,
-          points: t.points,
-          logoUrl: t.logoUrl || "",
-        });
+        setTimeout(() => {
+          setAdminTeamForm({
+            budget: t.budget,
+            salaryCap: t.salaryCap,
+            wins: t.wins,
+            losses: t.losses,
+            points: t.points,
+            logoUrl: t.logoUrl || "",
+          });
+        }, 0);
       }
     }
   }, [adminSelectedTeamId, adminTeamMode]);
@@ -282,38 +335,42 @@ export default function GameDashboard({
   // Reset form khi chuyển sang mode create
   useEffect(() => {
     if (adminPlayerMode === "create") {
-      setAdminSelectedPlayerId("");
-      setAdminPlayerForm({
-        name: "",
-        role: "TOP",
-        age: 18,
-        nationality: "Vietnam",
-        laning: 80,
-        teamfight: 80,
-        macro: 80,
-        mentality: 80,
-        championPool: 80,
-        salary: 100000,
-        value: 1000000,
-        avatarUrl: "",
-      });
-      setAdminPlayerTeamId("free");
+      setTimeout(() => {
+        setAdminSelectedPlayerId("");
+        setAdminPlayerForm({
+          name: "",
+          role: "TOP",
+          age: 18,
+          nationality: "Vietnam",
+          laning: 80,
+          teamfight: 80,
+          macro: 80,
+          mentality: 80,
+          championPool: 80,
+          salary: 100000,
+          value: 1000000,
+          avatarUrl: "",
+        });
+        setAdminPlayerTeamId("free");
+      }, 0);
     }
   }, [adminPlayerMode]);
 
   useEffect(() => {
     if (adminTeamMode === "create") {
-      setAdminSelectedTeamId("");
-      setAdminTeamName("");
-      setAdminTeamRegion("LCK");
-      setAdminTeamForm({
-        budget: 5000000,
-        salaryCap: 10000000,
-        wins: 0,
-        losses: 0,
-        points: 0,
-        logoUrl: "",
-      });
+      setTimeout(() => {
+        setAdminSelectedTeamId("");
+        setAdminTeamName("");
+        setAdminTeamRegion("LCK");
+        setAdminTeamForm({
+          budget: 5000000,
+          salaryCap: 10000000,
+          wins: 0,
+          losses: 0,
+          points: 0,
+          logoUrl: "",
+        });
+      }, 0);
     }
   }, [adminTeamMode]);
 
@@ -324,7 +381,7 @@ export default function GameDashboard({
     }
   }, [activeTab, adminSubTab]);
 
-  const fetchUsers = async () => {
+  async function fetchUsers() {
     setLoadingUsers(true);
     const res = await adminGetUsersAction();
     if (res.success && res.users) {
@@ -333,7 +390,7 @@ export default function GameDashboard({
       alert(res.error || "Không thể tải danh sách tài khoản.");
     }
     setLoadingUsers(false);
-  };
+  }
 
   const handleAdminUpdatePlayer = () => {
     if (!adminSelectedPlayerId) return;
@@ -423,6 +480,28 @@ export default function GameDashboard({
     }
   };
 
+  const handleAdminSendGlobalMail = () => {
+    if (!adminMailForm.title.trim() || !adminMailForm.content.trim() || !adminMailForm.sender.trim()) {
+      alert("Vui lòng điền đầy đủ tiêu đề, nội dung và người gửi.");
+      return;
+    }
+    setErrorMsg(null);
+    startTransition(async () => {
+      const res = await adminSendGlobalMailAction(adminMailForm);
+      if (res.success) {
+        alert("Đã gửi thư tới toàn bộ tài khoản thành công!");
+        setAdminMailForm({
+          title: "",
+          sender: "Ban Quản Trị LL26",
+          content: "",
+          category: "GENERAL"
+        });
+      } else {
+        alert(res.error || "Có lỗi xảy ra khi gửi thư.");
+      }
+    });
+  };
+
   // 1. Tiến ngày (Advance Day)
   const handleAdvanceDay = () => {
     setErrorMsg(null);
@@ -432,7 +511,7 @@ export default function GameDashboard({
         setMatchDayState({ matchId: res.matchId, date: res.date });
         setDraftMode(true);
       } else if (res.status === "SUCCESS") {
-        setSelectedMail(allMails[0] || null);
+        setSelectedMailId(allMails[0]?.id || null);
       } else if (res.error) {
         setErrorMsg(res.error);
       }
@@ -441,12 +520,24 @@ export default function GameDashboard({
 
   // 2. Click đọc thư
   const handleSelectMail = (mail: Mail) => {
-    setSelectedMail(mail);
-    if (!mail.read) {
+    setSelectedMailId(mail.id);
+    if (autoMarkRead && !mail.read) {
       startTransition(async () => {
-        await readMailAction(mail.id);
+        const res = await readMailAction(mail.id);
+        if (!res.success) {
+          console.error("Lỗi đọc thư:", res.error);
+        }
       });
     }
+  };
+
+  const handleMarkMailAsRead = (mailId: string) => {
+    startTransition(async () => {
+      const res = await readMailAction(mailId);
+      if (!res.success) {
+        console.error("Lỗi đọc thư:", res.error);
+      }
+    });
   };
 
   // 3. Ký hợp đồng tuyển thủ tự do
@@ -483,7 +574,7 @@ export default function GameDashboard({
     startTransition(async () => {
       const res = await submitDraftAndPlayAction(matchDayState.matchId, draft, opponentDraft);
       if (res.success) {
-        setMatchResult(res.result);
+        setMatchResult(res.result || null);
         setDraftMode(false);
       } else {
         setErrorMsg(res.error);
@@ -597,8 +688,8 @@ export default function GameDashboard({
     
     if (dbSortField !== "default") {
       result.sort((a, b) => {
-        let valA: any = 0;
-        let valB: any = 0;
+        let valA = 0;
+        let valB = 0;
         const avgA = Math.round((a.laning + a.teamfight + a.macro + a.mentality + a.championPool) / 5);
         const avgB = Math.round((b.laning + b.teamfight + b.macro + b.mentality + b.championPool) / 5);
         
@@ -615,9 +706,9 @@ export default function GameDashboard({
           valA = a.age;
           valB = b.age;
         } else if (dbSortField === "name") {
-          valA = a.name.toLowerCase();
-          valB = b.name.toLowerCase();
-          return dbSortOrder === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
+          const strA = a.name.toLowerCase();
+          const strB = b.name.toLowerCase();
+          return dbSortOrder === "asc" ? strA.localeCompare(strB) : strB.localeCompare(strA);
         }
         return dbSortOrder === "asc" ? valA - valB : valB - valA;
       });
@@ -634,8 +725,15 @@ export default function GameDashboard({
     const opponentTeam = allTeamsInRegion.find(t => t.id === opponentTeamId);
     const opponentPlayers = opponentTeam?.players || [];
 
+    const homeTeam = allTeamsInRegion.find(t => t.name === match?.homeTeam.name);
+    const awayTeam = allTeamsInRegion.find(t => t.name === match?.awayTeam.name);
+    const homeWins = homeTeam?.wins ?? 0;
+    const homeLosses = homeTeam?.losses ?? 0;
+    const awayWins = awayTeam?.wins ?? 0;
+    const awayLosses = awayTeam?.losses ?? 0;
+
     return (
-      <div className="min-h-screen bg-zinc-950 p-6 flex items-center justify-center">
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center w-full">
         <DraftScreen
           matchId={matchDayState.matchId}
           homeTeamName={match?.homeTeam.name || ""}
@@ -644,10 +742,17 @@ export default function GameDashboard({
           userTeamName={userTeam.name}
           opponentTeamName={opponentName || ""}
           opponentPlayers={opponentPlayers}
+          userPlayers={userTeam.players || []}
           onDraftComplete={handleDraftComplete}
           isPending={isPending}
           championTiers={championTiers}
           championImages={championImages}
+          currentDate={initialGameState.currentDate}
+          currentWeek={initialGameState.week}
+          homeWins={homeWins}
+          homeLosses={homeLosses}
+          awayWins={awayWins}
+          awayLosses={awayLosses}
         />
       </div>
     );
@@ -701,6 +806,11 @@ export default function GameDashboard({
 
         {/* Thông tin nhanh về tài chính & ngày hiện tại */}
         <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-zinc-300">
+          <div className="flex items-center gap-1.5 bg-zinc-950 px-3 py-2 rounded-lg border border-zinc-850">
+            <Trophy className="w-3.5 h-3.5 text-yellow-500" />
+            <span>Giải đấu: <span className="text-yellow-400 font-bold">{getSeasonStateLabel(initialGameState.seasonState)}</span></span>
+          </div>
+
           <div className="flex items-center gap-1.5 bg-zinc-950 px-3 py-2 rounded-lg border border-zinc-850">
             <DollarSign className="w-3.5 h-3.5 text-emerald-500" />
             <span>Ngân sách: <span className="text-emerald-400 font-bold">${userTeam.budget.toLocaleString()}</span></span>
@@ -951,7 +1061,18 @@ export default function GameDashboard({
           {activeTab === "inbox" && (
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 lg:h-[calc(100vh-160px)] items-stretch">
               <div className="lg:col-span-2 flex flex-col h-full min-h-0">
-                <h2 className="text-sm font-black text-zinc-400 tracking-wider uppercase mb-2">Danh sách email</h2>
+                <div className="flex justify-between items-center mb-2">
+                  <h2 className="text-sm font-black text-zinc-400 tracking-wider uppercase">Danh sách email</h2>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={autoMarkRead}
+                      onChange={(e) => setAutoMarkRead(e.target.checked)}
+                      className="rounded border-zinc-800 bg-zinc-950 text-blue-500 focus:ring-0 focus:ring-offset-0 w-3 h-3 cursor-pointer"
+                    />
+                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Tự động đọc</span>
+                  </label>
+                </div>
                 <div className="space-y-2 flex-grow overflow-y-auto pr-1 min-h-0 lg:max-h-[calc(100vh-200px)]">
                   {allMails.length === 0 ? (
                     <div className="text-zinc-600 text-xs py-8 text-center font-medium">Hộp thư trống</div>
@@ -987,7 +1108,19 @@ export default function GameDashboard({
                     <CardHeader className="border-b border-zinc-800 py-4 flex-shrink-0">
                       <div className="flex justify-between items-center text-xs text-zinc-400 font-semibold mb-2">
                         <span>Người gửi: <span className="text-zinc-300 font-bold">{selectedMail.sender}</span></span>
-                        <span className="font-mono">{selectedMail.date}</span>
+                        <div className="flex items-center gap-3">
+                          {!selectedMail.read && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleMarkMailAsRead(selectedMail.id)}
+                              className="h-7 text-[10px] font-bold text-blue-400 hover:text-blue-300 border-blue-900/50 hover:bg-blue-950/20"
+                            >
+                              Đánh dấu đã đọc
+                            </Button>
+                          )}
+                          <span className="font-mono">{selectedMail.date}</span>
+                        </div>
                       </div>
                       <CardTitle className="text-base font-extrabold text-zinc-100 leading-snug">
                         {selectedMail.title}
@@ -1849,6 +1982,16 @@ export default function GameDashboard({
                 >
                   Tài khoản ({adminUsers.length})
                 </button>
+                <button
+                  onClick={() => setAdminSubTab("mail")}
+                  className={`px-4 py-2 text-xs font-bold border-b-2 transition-all ${
+                    adminSubTab === "mail"
+                      ? "border-rose-500 text-rose-400"
+                      : "border-transparent text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  Gửi thư toàn SV
+                </button>
               </div>
 
               {/* 1. SUB-TAB ADMIN: PLAYERS */}
@@ -2340,6 +2483,85 @@ export default function GameDashboard({
                   </CardContent>
                 </Card>
               )}
+
+              {/* 4. SUB-TAB ADMIN: MAIL */}
+              {adminSubTab === "mail" && (
+                <Card className="bg-zinc-900 border-zinc-800 shadow-xl max-w-2xl mx-auto animate-in fade-in-50 duration-200">
+                  <CardHeader className="border-b border-zinc-800 py-4">
+                    <CardTitle className="text-base font-extrabold text-rose-400 flex items-center gap-2">
+                      <MailIcon className="w-5 h-5" />
+                      GỬI THƯ THÔNG BÁO TOÀN SV
+                    </CardTitle>
+                    <CardDescription className="text-xs text-zinc-500">
+                      Gửi thư thông báo đến toàn bộ người chơi hiện có trong hệ thống và tự động lưu làm mẫu cho tài khoản đăng ký mới sau này.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="py-6 space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Người gửi</label>
+                        <Input
+                          type="text"
+                          value={adminMailForm.sender}
+                          onChange={(e) => setAdminMailForm({ ...adminMailForm, sender: e.target.value })}
+                          className="bg-zinc-950 border-zinc-800 text-zinc-100 text-xs focus-visible:ring-rose-500 focus-visible:border-rose-500"
+                          placeholder="Ví dụ: Ban Quản Trị, BTC Giải Đấu..."
+                        />
+                      </div>
+                      
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Phân loại thư (Category)</label>
+                        <Select
+                          value={adminMailForm.category}
+                          onValueChange={(val) => setAdminMailForm({ ...adminMailForm, category: val || "GENERAL" })}
+                        >
+                          <SelectTrigger className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs focus:ring-rose-500">
+                            <SelectValue placeholder="Chọn phân loại..." />
+                          </SelectTrigger>
+                          <SelectContent className="bg-zinc-900 border-zinc-850 text-zinc-200">
+                            <SelectItem value="GENERAL">GENERAL (Chung / Hệ thống)</SelectItem>
+                            <SelectItem value="TRANSFER">TRANSFER (Chuyển nhượng)</SelectItem>
+                            <SelectItem value="MATCH">MATCH (Trận đấu)</SelectItem>
+                            <SelectItem value="BOARD">BOARD (Ban quản lý)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Tiêu đề email</label>
+                      <Input
+                        type="text"
+                        value={adminMailForm.title}
+                        onChange={(e) => setAdminMailForm({ ...adminMailForm, title: e.target.value })}
+                        className="bg-zinc-950 border-zinc-800 text-zinc-100 text-xs focus-visible:ring-rose-500 focus-visible:border-rose-500"
+                        placeholder="Nhập tiêu đề thông báo..."
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Nội dung thư</label>
+                      <textarea
+                        value={adminMailForm.content}
+                        onChange={(e) => setAdminMailForm({ ...adminMailForm, content: e.target.value })}
+                        rows={6}
+                        className="flex w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-500 focus-visible:border-rose-500"
+                        placeholder="Nhập nội dung thư gửi tới tất cả người chơi..."
+                      />
+                    </div>
+                  </CardContent>
+                  <CardFooter className="border-t border-zinc-800 py-4 flex justify-end">
+                    <Button
+                      disabled={isPending}
+                      onClick={handleAdminSendGlobalMail}
+                      className="bg-rose-600 hover:bg-rose-500 text-zinc-50 font-bold text-xs px-4 py-2 flex items-center gap-1.5"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      {isPending ? "ĐANG GỬI THƯ..." : "GỬI THƯ TOÀN SV"}
+                    </Button>
+                  </CardFooter>
+                </Card>
+              )}
             </div>
           )}
           {/* DIALOG CHI TIẾT TUYỂN THỦ (GLOBAL) */}
@@ -2599,22 +2821,4 @@ export default function GameDashboard({
   );
 }
 
-// Loader icon component
-function Loader2(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...props}
-    >
-      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-    </svg>
-  );
-}
+

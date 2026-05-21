@@ -13,7 +13,14 @@ export function signToken(payload: object): string {
   return `${dataStr}.${signature}`;
 }
 
-export function verifyToken(token: string): any | null {
+export interface JWTPayload {
+  id: string;
+  username: string;
+  displayName: string;
+  role: string;
+}
+
+export function verifyToken(token: string): JWTPayload | null {
   try {
     const [dataStr, signature] = token.split(".");
     if (!dataStr || !signature) return null;
@@ -21,7 +28,7 @@ export function verifyToken(token: string): any | null {
     if (signature !== expectedSig) return null;
     
     const decoded = Buffer.from(dataStr, "base64").toString("utf-8");
-    return JSON.parse(decoded);
+    return JSON.parse(decoded) as JWTPayload;
   } catch (e) {
     return null;
   }

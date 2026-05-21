@@ -292,4 +292,59 @@ export async function adminUpdateTournamentAction(
   }
 }
 
+// 7. Gửi tin nhắn tới toàn bộ máy chủ (tất cả user)
+export async function adminSendGlobalMailAction(data: {
+  title: string;
+  content: string;
+  sender: string;
+  category?: string;
+}) {
+  try {
+    await checkAdmin();
 
+    const { title, content, sender, category = "GENERAL" } = data;
+    if (!title || !content || !sender) {
+      throw new Error("Vui lòng điền đầy đủ tiêu đề, nội dung và người gửi.");
+    }
+
+    // 1. Lấy tất cả người dùng trong hệ thống kèm theo GameState của họ
+    const users = await db.user.findMany({
+      include: { gameState: true }
+    });
+
+    // 2. Gửi thư cho từng người dùng hiện tại
+    for (const u of users) {
+      const date = u.gameState?.currentDate || "2026-01-05";
+      await db.mail.create({
+        data: {
+          title,
+          content,
+          date,
+          sender,
+          category,
+          read: false,
+          userId: u.id
+        }
+      });
+    }
+
+    // 3. Tạo 1 bản sao global template (userId: null) để người chơi mới sau này cũng nhận được
+    await db.mail.create({
+      data: {
+        title,
+        content,
+        date: "2026-01-05", // Ngày mặc định khi khởi tạo GameState
+        sender,
+        category,
+        read: false,
+        userId: null
+      }
+    });
+
+    revalidatePath("/");
+    return { success: true };
+  } catch (error: any) {
+    console.error("Lỗi admin gửi thư toàn server:", error);
+    return { success: false, error: error.message };
+  }
+}

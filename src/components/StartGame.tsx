@@ -57,7 +57,7 @@ export default function StartGame({ teams }: StartGameProps) {
       <div className="w-full max-w-6xl z-10">
         <div className="text-center mb-8">
           <h1 className="text-5xl font-extrabold tracking-tight bg-gradient-to-r from-blue-400 via-indigo-400 to-emerald-400 bg-clip-text text-transparent mb-2">
-            LOL LEGEND '26
+            {"LOL LEGEND '26"}
           </h1>
           <p className="text-zinc-400 text-lg font-medium">
             Chọn đội tuyển khởi nghiệp huấn luyện viên chuyên nghiệp của bạn

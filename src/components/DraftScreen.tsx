@@ -36,6 +36,8 @@ interface DraftScreenProps {
   awayTeamName: string;
   homeTeamAbbreviation?: string | null;
   awayTeamAbbreviation?: string | null;
+  homeTeamLogoUrl?: string | null;
+  awayTeamLogoUrl?: string | null;
   isUserHome: boolean;
   userTeamName: string;
   opponentTeamName: string;
@@ -144,12 +146,14 @@ function getDDragonName(champId: string): string {
   return DDRAGON_NAMES[champId] || (champId.charAt(0).toUpperCase() + champId.slice(1));
 }
 
-function getChampionSplashUrl(champId: string): string {
+function getChampionSplashUrl(champId: string, championImages?: Record<string, string>): string {
+  if (championImages?.[champId]) return championImages[champId];
   const dDragonName = getDDragonName(champId);
   return `https://ddragon.leagueoflegends.com/cdn/img/champion/loading/${dDragonName}_0.jpg`;
 }
 
-function getChampionIconUrl(champId: string): string {
+function getChampionIconUrl(champId: string, championImages?: Record<string, string>): string {
+  if (championImages?.[champId]) return championImages[champId];
   const dDragonName = getDDragonName(champId);
   return `https://ddragon.leagueoflegends.com/cdn/14.3.1/img/champion/${dDragonName}.png`;
 }
@@ -160,6 +164,8 @@ export default function DraftScreen({
   awayTeamName,
   homeTeamAbbreviation,
   awayTeamAbbreviation,
+  homeTeamLogoUrl,
+  awayTeamLogoUrl,
   isUserHome,
   userTeamName,
   opponentTeamName,
@@ -504,7 +510,7 @@ export default function DraftScreen({
             {/* Left Box: Blue Bans */}
             <div className="flex flex-col items-start bg-black/40 border border-blue-900/20 rounded-lg p-3 backdrop-blur-sm w-[260px] shadow-lg">
               <div className="flex items-center gap-2 mb-2">
-                <TeamLogo teamName={homeTeamName} size={32} abbreviation={homeTeamAbbreviation} />
+                <TeamLogo teamName={homeTeamName} size={32} abbreviation={homeTeamAbbreviation} imageUrl={homeTeamLogoUrl} />
                 <div>
                   <h4 className="text-xs font-black text-blue-400 tracking-wider">BLUE BANS</h4>
                   <p className="text-[10px] text-zinc-500 font-medium font-mono truncate max-w-[150px]" title={homeTeamName}>{homeTeamName}</p>
@@ -523,7 +529,7 @@ export default function DraftScreen({
                     >
                       {champ ? (
                         <>
-                          <img src={getChampionIconUrl(champ.id)} alt={champ.name} className="w-full h-full object-cover grayscale opacity-60" />
+                          <img src={getChampionIconUrl(champ.id, championImages)} alt={champ.name} className="w-full h-full object-cover grayscale opacity-60" />
                           <div className="absolute inset-0 bg-red-950/20" />
                           {/* Red ban slash */}
                           <div className="absolute w-[140%] h-[2px] bg-red-600 rotate-45 transform origin-center" />
@@ -629,7 +635,7 @@ export default function DraftScreen({
 
                           {/* Image */}
                           <div className="w-9 h-9 rounded overflow-hidden border border-zinc-850 my-1">
-                            <img src={getChampionIconUrl(champ.id)} alt={champ.name} className="w-full h-full object-cover" />
+                            <img src={getChampionIconUrl(champ.id, championImages)} alt={champ.name} className="w-full h-full object-cover" />
                           </div>
 
                           {/* Name */}
@@ -683,7 +689,7 @@ export default function DraftScreen({
             {/* Right Box: Red Bans */}
             <div className="flex flex-col items-end bg-black/40 border border-red-900/20 rounded-lg p-3 backdrop-blur-sm w-[260px] shadow-lg">
               <div className="flex items-center gap-2 mb-2 flex-row-reverse text-right">
-                <TeamLogo teamName={awayTeamName} size={32} abbreviation={awayTeamAbbreviation} />
+                <TeamLogo teamName={awayTeamName} size={32} abbreviation={awayTeamAbbreviation} imageUrl={awayTeamLogoUrl} />
                 <div>
                   <h4 className="text-xs font-black text-red-400 tracking-wider">RED BANS</h4>
                   <p className="text-[10px] text-zinc-500 font-medium font-mono truncate max-w-[150px]" title={awayTeamName}>{awayTeamName}</p>
@@ -702,7 +708,7 @@ export default function DraftScreen({
                     >
                       {champ ? (
                         <>
-                          <img src={getChampionIconUrl(champ.id)} alt={champ.name} className="w-full h-full object-cover grayscale opacity-60" />
+                          <img src={getChampionIconUrl(champ.id, championImages)} alt={champ.name} className="w-full h-full object-cover grayscale opacity-60" />
                           <div className="absolute inset-0 bg-red-950/20" />
                           {/* Red ban slash */}
                           <div className="absolute w-[140%] h-[2px] bg-red-600 rotate-45 transform origin-center" />
@@ -754,7 +760,7 @@ export default function DraftScreen({
                 {champ ? (
                   <>
                     <img 
-                      src={getChampionSplashUrl(champ.id)} 
+                      src={getChampionSplashUrl(champ.id, championImages)} 
                       alt={champ.name}
                       className="absolute inset-0 w-full h-full object-cover object-top transition-transform duration-500 group-hover:scale-105"
                     />
@@ -834,7 +840,7 @@ export default function DraftScreen({
           <div className="flex items-center justify-between w-full px-2">
             {/* Blue Logo */}
             <div className="flex flex-col items-center gap-1 flex-1">
-              <TeamLogo teamName={homeTeamName} size={42} abbreviation={homeTeamAbbreviation} />
+              <TeamLogo teamName={homeTeamName} size={42} abbreviation={homeTeamAbbreviation} imageUrl={homeTeamLogoUrl} />
               <span className="text-xs font-black text-zinc-150 tracking-wider font-mono uppercase">
                 {homeTeamAbbreviation || homeTeamName.substring(0, 3).toUpperCase()}
               </span>
@@ -856,7 +862,7 @@ export default function DraftScreen({
 
             {/* Red Logo */}
             <div className="flex flex-col items-center gap-1 flex-1">
-              <TeamLogo teamName={awayTeamName} size={42} abbreviation={awayTeamAbbreviation} />
+              <TeamLogo teamName={awayTeamName} size={42} abbreviation={awayTeamAbbreviation} imageUrl={awayTeamLogoUrl} />
               <span className="text-xs font-black text-zinc-150 tracking-wider font-mono uppercase">
                 {awayTeamAbbreviation || awayTeamName.substring(0, 3).toUpperCase()}
               </span>
@@ -900,7 +906,7 @@ export default function DraftScreen({
                 {champ ? (
                   <>
                     <img 
-                      src={getChampionSplashUrl(champ.id)} 
+                      src={getChampionSplashUrl(champ.id, championImages)} 
                       alt={champ.name}
                       className="absolute inset-0 w-full h-full object-cover object-top transition-transform duration-500 group-hover:scale-105"
                     />

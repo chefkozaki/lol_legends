@@ -275,6 +275,10 @@ export default function GameDashboard({
   }[]>([]);
   const [loadingUsers, setLoadingUsers] = useState<boolean>(false);
 
+  // Trạng thái cập nhật ảnh Tướng (Admin)
+  const [adminEditingChampId, setAdminEditingChampId] = useState<string | null>(null);
+  const [adminChampImageUrl, setAdminChampImageUrl] = useState<string>("");
+
   // Trạng thái cho form gửi thư toàn server
   const [adminMailForm, setAdminMailForm] = useState({
     title: "",
@@ -283,11 +287,29 @@ export default function GameDashboard({
     category: "GENERAL"
   });
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, callback: (base64: string) => void) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (file.size > 1 * 1024 * 1024) {
+      alert("Kích thước ảnh không được vượt quá 1MB");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === "string") {
+        callback(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   // Gom toàn bộ tuyển thủ trong Save Game để Admin chỉnh sửa
   const allPlayersInSaveGame = [
-    ...freeAgents.map(p => ({ ...p, teamName: "Tự Do", teamId: null })),
+    ...freeAgents.map(p => ({ ...p, teamName: "Tự Do", teamId: null, teamLogoUrl: null })),
     ...allTeamsInRegion.flatMap(t => 
-      t.players.map(p => ({ ...p, teamName: t.name, teamId: t.id }))
+      t.players.map(p => ({ ...p, teamName: t.name, teamId: t.id, teamLogoUrl: t.logoUrl }))
     )
   ].sort((a, b) => a.name.localeCompare(b.name));
 
@@ -814,6 +836,8 @@ export default function GameDashboard({
           awayTeamName={match?.awayTeam.name || ""}
           homeTeamAbbreviation={homeTeam?.abbreviation}
           awayTeamAbbreviation={awayTeam?.abbreviation}
+          homeTeamLogoUrl={homeTeam?.logoUrl}
+          awayTeamLogoUrl={awayTeam?.logoUrl}
           isUserHome={!!isUserHome}
           userTeamName={userTeam.name}
           opponentTeamName={opponentName || ""}
@@ -865,7 +889,7 @@ export default function GameDashboard({
       {/* 1. HEADER */}
       <header className="bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex flex-col lg:flex-row justify-between items-center gap-4 z-10 shadow-md">
         <div className="flex items-center gap-4">
-          <TeamLogo teamName={userTeam.name} size={68} />
+          <TeamLogo teamName={userTeam.name} size={68} imageUrl={userTeam.logoUrl} />
           <div>
             <h1 className="text-xl font-black tracking-tight text-zinc-100 flex items-center gap-2">
               LOL LEGEND &apos;26
@@ -1254,7 +1278,7 @@ export default function GameDashboard({
                           </TableCell>
                           <TableCell className="font-bold text-zinc-100">
                             <div className="flex items-center gap-3">
-                              <PlayerAvatar playerName={player.name} role={player.role} size={56} />
+                              <PlayerAvatar playerName={player.name} role={player.role} size={56} imageUrl={player.avatarUrl} />
                               <div>
                                 {player.name}
                                 <span className="text-[10px] text-zinc-500 font-semibold block mt-0.5">{player.realName}</span>
@@ -1385,7 +1409,7 @@ export default function GameDashboard({
                             <TableCell className="text-center font-bold text-zinc-400">{idx + 1}</TableCell>
                             <TableCell className={`font-semibold ${isUser ? "text-blue-400" : "text-zinc-200"}`}>
                               <div className="flex items-center gap-2.5">
-                                <TeamLogo teamName={team.name} size={42} />
+                                <TeamLogo teamName={team.name} size={42} imageUrl={team.logoUrl} />
                                 <span>{team.name}</span>
                                 {isUser && <Badge className="bg-blue-600 text-[8px] py-0 ml-1 font-bold">USER</Badge>}
                               </div>
@@ -1454,7 +1478,7 @@ export default function GameDashboard({
                             <TableCell className="font-semibold text-zinc-200">
                               <div className="flex items-center gap-2.5">
                                 <span className="text-zinc-500 text-xs">VS</span>
-                                <TeamLogo teamName={opponentName} size={42} />
+                                <TeamLogo teamName={opponentName} size={42} imageUrl={isUserHome ? match.awayTeam.logoUrl : match.homeTeam.logoUrl} />
                                 <span className="text-zinc-100 font-bold">{opponentName}</span>
                               </div>
                             </TableCell>
@@ -1650,7 +1674,21 @@ export default function GameDashboard({
                                   {champ.type === "Enchanter" && <Wand2 className="w-7 h-7 text-emerald-400/70" />}
                                 </div>
                               )}
-                              <div className="text-xs font-bold text-zinc-100 group-hover:text-emerald-400 transition-colors">{champ.name}</div>
+                              <div className="flex items-center gap-1 w-full justify-center px-1">
+                                <div className="text-xs font-bold text-zinc-100 group-hover:text-emerald-400 transition-colors truncate">{champ.name}</div>
+                                {currentUser?.role === "ADMIN" && (
+                                  <button
+                                    onClick={() => {
+                                      setAdminEditingChampId(champ.id);
+                                      setAdminChampImageUrl(championImages?.[champ.id] || "");
+                                    }}
+                                    className="text-zinc-500 hover:text-emerald-400 p-0.5"
+                                    title="Đổi ảnh tướng"
+                                  >
+                                    <Settings2 className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
                               
                               {currentUser?.role === "ADMIN" ? (
                                 <select
@@ -1678,6 +1716,79 @@ export default function GameDashboard({
                   );
                 })}
               </div>
+
+              {/* Hộp thoại Đổi Ảnh Tướng (Admin) */}
+              <Dialog open={!!adminEditingChampId} onOpenChange={(open) => !open && setAdminEditingChampId(null)}>
+                <DialogContent className="bg-zinc-950 border border-zinc-800 text-zinc-100 sm:max-w-[425px]">
+                  <DialogHeader>
+                    <DialogTitle className="text-lg font-black tracking-tight flex items-center gap-2">
+                      <Settings2 className="w-5 h-5 text-emerald-500" />
+                      Đổi Ảnh Tướng
+                    </DialogTitle>
+                    <DialogDescription className="text-zinc-400 text-xs">
+                      Cập nhật ảnh đại diện (icon) của tướng. Dán link URL hoặc tải ảnh lên từ máy.
+                    </DialogDescription>
+                  </DialogHeader>
+                  
+                  <div className="space-y-4 py-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider block">URL Hình Ảnh / File</label>
+                      <Input
+                        type="text"
+                        value={adminChampImageUrl}
+                        onChange={(e) => setAdminChampImageUrl(e.target.value)}
+                        placeholder="https://..."
+                        className="bg-zinc-900 border-zinc-800 text-zinc-100 text-xs mb-2"
+                      />
+                      <Input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleImageUpload(e, setAdminChampImageUrl)}
+                        className="bg-zinc-900 border-zinc-800 text-zinc-100 text-xs w-full cursor-pointer"
+                      />
+                    </div>
+
+                    {adminChampImageUrl && (
+                      <div className="flex justify-center mt-4">
+                        <div className="w-20 h-20 rounded-lg overflow-hidden border-2 border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.3)] bg-zinc-950">
+                          <img src={adminChampImageUrl} alt="Preview" className="w-full h-full object-cover" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="flex justify-end gap-3 mt-2 border-t border-zinc-800 pt-4">
+                    <Button
+                      disabled={isPending}
+                      variant="outline"
+                      onClick={() => setAdminEditingChampId(null)}
+                      className="border-zinc-800 text-zinc-300 hover:bg-zinc-900 text-xs h-8"
+                    >
+                      Hủy
+                    </Button>
+                    <Button
+                      disabled={isPending}
+                      onClick={() => {
+                        if (!adminEditingChampId) return;
+                        const newImages = { ...championImages, [adminEditingChampId]: adminChampImageUrl };
+                        setChampionImages(newImages);
+                        startTransition(async () => {
+                          const res = await adminUpdateChampionTiersAction(championTiers, newImages);
+                          if (res.success) {
+                            alert("Đã cập nhật ảnh tướng thành công!");
+                            setAdminEditingChampId(null);
+                          } else {
+                            alert(res.error || "Lỗi cập nhật ảnh tướng");
+                          }
+                        });
+                      }}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-zinc-50 font-bold text-xs h-8 px-4"
+                    >
+                      {isPending ? "ĐANG LƯU..." : "LƯU LẠI"}
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </div>
           )}
 
@@ -1874,7 +1985,7 @@ export default function GameDashboard({
                             >
                               <TableCell className="font-bold text-zinc-100 py-3">
                                 <div className="flex items-center gap-3">
-                                  <TeamLogo teamName={team.name} size={56} />
+                                  <TeamLogo teamName={team.name} size={56} imageUrl={team.logoUrl} />
                                   <div className="flex flex-col">
                                     <span className="flex items-center gap-1.5">
                                       {team.name}
@@ -1991,7 +2102,7 @@ export default function GameDashboard({
                                 <div className="flex items-center gap-2.5">
                                   {player.teamId ? (
                                     <>
-                                      <TeamLogo teamName={player.teamName || ""} size={36} />
+                                      <TeamLogo teamName={player.teamName || ""} size={36} imageUrl={player.teamLogoUrl} />
                                       <span className="text-xs text-zinc-300 font-bold">{player.teamName}</span>
                                     </>
                                   ) : (
@@ -2283,6 +2394,30 @@ export default function GameDashboard({
                             className="bg-zinc-950 border-zinc-800 text-zinc-100 text-xs"
                           />
                         </div>
+
+                        <div className="space-y-1.5 sm:col-span-2">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Ảnh Đại Diện (URL hoặc Tải lên)</label>
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <Input
+                              type="text"
+                              value={adminPlayerForm.avatarUrl}
+                              onChange={(e) => setAdminPlayerForm({ ...adminPlayerForm, avatarUrl: e.target.value })}
+                              placeholder="https://... hoặc chọn file"
+                              className="bg-zinc-950 border-zinc-800 text-zinc-100 text-xs flex-1"
+                            />
+                            <Input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => handleImageUpload(e, (base64) => setAdminPlayerForm({ ...adminPlayerForm, avatarUrl: base64 }))}
+                              className="bg-zinc-950 border-zinc-800 text-zinc-100 text-xs w-full sm:w-[200px] cursor-pointer"
+                            />
+                          </div>
+                          {adminPlayerForm.avatarUrl && (
+                            <div className="mt-2 w-12 h-12 rounded-full overflow-hidden border border-zinc-800">
+                              <img src={adminPlayerForm.avatarUrl} alt="Preview" className="w-full h-full object-cover" />
+                            </div>
+                          )}
+                        </div>
                       </CardContent>
                       <CardFooter className="border-t border-zinc-800 py-4 flex justify-end gap-3">
                         <Button
@@ -2473,6 +2608,30 @@ export default function GameDashboard({
                             </div>
                           </>
                         )}
+
+                        <div className="space-y-1.5 sm:col-span-2">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Logo Đội Tuyển (URL hoặc Tải lên)</label>
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <Input
+                              type="text"
+                              value={adminTeamForm.logoUrl}
+                              onChange={(e) => setAdminTeamForm({ ...adminTeamForm, logoUrl: e.target.value })}
+                              placeholder="https://... hoặc chọn file"
+                              className="bg-zinc-950 border-zinc-800 text-zinc-100 text-xs flex-1"
+                            />
+                            <Input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => handleImageUpload(e, (base64) => setAdminTeamForm({ ...adminTeamForm, logoUrl: base64 }))}
+                              className="bg-zinc-950 border-zinc-800 text-zinc-100 text-xs w-full sm:w-[200px] cursor-pointer"
+                            />
+                          </div>
+                          {adminTeamForm.logoUrl && (
+                            <div className="mt-2 w-12 h-12 rounded-lg overflow-hidden border border-zinc-800 bg-zinc-950 flex items-center justify-center">
+                              <img src={adminTeamForm.logoUrl} alt="Preview" className="max-w-full max-h-full object-contain" />
+                            </div>
+                          )}
+                        </div>
                       </CardContent>
                       <CardFooter className="border-t border-zinc-800 py-4 flex justify-end gap-3">
                         <Button

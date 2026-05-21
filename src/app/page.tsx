@@ -69,7 +69,7 @@ export default async function Home() {
   });
 
   // Lọc lấy các đội bóng trong khu vực của người dùng
-  const allTeamsInRegion = allTeams.filter(t => t.region === userTeam.region);
+  const allTeamsInRegion = allTeams.filter((t: any) => t.region === userTeam.region);
 
   // Lấy lịch thi đấu của người chơi
   const rawUserMatches = await db.match.findMany({

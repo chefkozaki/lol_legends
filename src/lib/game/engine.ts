@@ -200,10 +200,14 @@ export function simulateLoLGame(
     const homeTeamBasePower = homeSims.reduce((acc, p) => acc + p.draftPower, 0);
     const awayTeamBasePower = awaySims.reduce((acc, p) => acc + p.draftPower, 0);
 
-    const homePower = homeTeamBasePower + (homeGold * 0.05) + (homeDragons * 40) + (homeBarons * 80);
-    const awayPower = awayTeamBasePower + (awayGold * 0.05) + (awayDragons * 40) + (awayBarons * 80);
+    // Sử dụng chênh lệch tiền thay vì tiền tuyệt đối để tránh làm loãng chỉ số kỹ năng tuyển thủ
+    const goldDiff = homeGold - awayGold;
+    const homePower = homeTeamBasePower + (goldDiff > 0 ? goldDiff * 0.05 : 0) + (homeDragons * 40) + (homeBarons * 80);
+    const awayPower = awayTeamBasePower + (goldDiff < 0 ? Math.abs(goldDiff) * 0.05 : 0) + (awayDragons * 40) + (awayBarons * 80);
 
-    const winRatio = homePower / (homePower + awayPower); // Xác suất bên home thắng thế trong các sự kiện
+    // Áp dụng hàm Sigmoid (Logistic) để phân hóa rõ rệt sự chênh lệch sức mạnh
+    const powerDiff = homePower - awayPower;
+    const winRatio = 1 / (1 + Math.exp(-powerDiff / 80));
 
     // 2. Sự kiện ngẫu nhiên theo phút
     const rand = Math.random();
@@ -218,8 +222,9 @@ export function simulateLoLGame(
         const homeP = homeSims.find(s => s.role === role)!;
         const awayP = awaySims.find(s => s.role === role)!;
 
-        // Tính tỉ lệ hạ gục dựa trên chỉ số laning và draftPower
-        const laneRatio = (homeP.draftPower + homeP.laning) / (homeP.draftPower + homeP.laning + awayP.draftPower + awayP.laning);
+        // Tính tỉ lệ hạ gục dựa trên chỉ số laning và draftPower bằng hàm Sigmoid
+        const laneDiff = (homeP.draftPower + homeP.laning) - (awayP.draftPower + awayP.laning);
+        const laneRatio = 1 / (1 + Math.exp(-laneDiff / 30));
         const killerIsHome = Math.random() < laneRatio;
 
         if (killerIsHome) {
@@ -410,9 +415,15 @@ export function simulateLoLGame(
     if (time >= 25) {
       if (rand < 0.25) {
         // Combat lớn nổ ra
-        const homeTFStrength = homeSims.reduce((acc, p) => acc + p.teamfight + p.draftPower, 0) + (homeGold * 0.05);
-        const awayTFStrength = awaySims.reduce((acc, p) => acc + p.teamfight + p.draftPower, 0) + (awayGold * 0.05);
-        const tfWinRatio = homeTFStrength / (homeTFStrength + awayTFStrength);
+        const homeTFStrength = homeSims.reduce((acc, p) => acc + p.teamfight + p.draftPower, 0);
+        const awayTFStrength = awaySims.reduce((acc, p) => acc + p.teamfight + p.draftPower, 0);
+        const goldDiff = homeGold - awayGold;
+        
+        const homeTFPower = homeTFStrength + (goldDiff > 0 ? goldDiff * 0.05 : 0);
+        const awayTFPower = awayTFStrength + (goldDiff < 0 ? Math.abs(goldDiff) * 0.05 : 0);
+        
+        const tfDiff = homeTFPower - awayTFPower;
+        const tfWinRatio = 1 / (1 + Math.exp(-tfDiff / 120));
         const homeWinsTF = Math.random() < tfWinRatio;
 
         if (homeWinsTF) {
@@ -446,8 +457,8 @@ export function simulateLoLGame(
             });
           }
           
-          // Điều kiện kết thúc game
-          if (homeTowers >= 5 && (homeTowers >= 9 || homeGold - awayGold > 8000 || Math.random() < 0.4)) {
+          // Điều kiện kết thúc game: Cần ít nhất 7 trụ đã hủy (hoặc sau khi phá thêm) hoặc chênh lệch tiền cực lớn
+          if (homeTowers >= 7 && (homeTowers >= 9 || homeGold - awayGold > 6000 || Math.random() < 0.35)) {
             const remainingTowers = 11 - homeTowers;
             if (remainingTowers > 0) {
               events.push({
@@ -497,7 +508,7 @@ export function simulateLoLGame(
             });
           }
           
-          if (awayTowers >= 5 && (awayTowers >= 9 || awayGold - homeGold > 8000 || Math.random() < 0.4)) {
+          if (awayTowers >= 7 && (awayTowers >= 9 || awayGold - homeGold > 6000 || Math.random() < 0.35)) {
             const remainingTowers = 11 - awayTowers;
             if (remainingTowers > 0) {
               events.push({

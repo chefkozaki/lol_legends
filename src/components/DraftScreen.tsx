@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { CHAMPIONS, Champion } from "@/lib/game/champions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,51 +25,50 @@ interface DraftScreenProps {
   championImages?: Record<string, string>;
 }
 
-// Client-side AI choice generator
-function generateAIChoice(opponentPlayers: any[], championTiers: Record<string, string>) {
-  const bans: string[] = [];
-  const picks: Record<string, string> = {};
+type DraftStep = {
+  type: "BAN" | "PICK";
+  side: "BLUE" | "RED";
+  index: number; // 0-based index of ban or pick for that side
+};
 
-  const roles = ["TOP", "JUG", "MID", "BOT", "SUP"] as const;
+const DRAFT_STEPS: DraftStep[] = [
+  // Phase 1 Bans (3 each)
+  { type: "BAN", side: "BLUE", index: 0 },
+  { type: "BAN", side: "RED", index: 0 },
+  { type: "BAN", side: "BLUE", index: 1 },
+  { type: "BAN", side: "RED", index: 1 },
+  { type: "BAN", side: "BLUE", index: 2 },
+  { type: "BAN", side: "RED", index: 2 },
 
-  // 1. AI cấm ngẫu nhiên 5 tướng
-  const allChamps = [...CHAMPIONS];
-  for (let i = 0; i < 5; i++) {
-    const idx = Math.floor(Math.random() * allChamps.length);
-    bans.push(allChamps[idx].id);
-    allChamps.splice(idx, 1);
+  // Phase 1 Picks (3 each)
+  { type: "PICK", side: "BLUE", index: 0 },
+  { type: "PICK", side: "RED", index: 0 },
+  { type: "PICK", side: "RED", index: 1 },
+  { type: "PICK", side: "BLUE", index: 1 },
+  { type: "PICK", side: "BLUE", index: 2 },
+  { type: "PICK", side: "RED", index: 2 },
+
+  // Phase 2 Bans (2 each)
+  { type: "BAN", side: "BLUE", index: 3 },
+  { type: "BAN", side: "RED", index: 3 },
+  { type: "BAN", side: "BLUE", index: 4 },
+  { type: "BAN", side: "RED", index: 4 },
+
+  // Phase 2 Picks (2 each)
+  { type: "PICK", side: "BLUE", index: 3 },
+  { type: "PICK", side: "RED", index: 3 },
+  { type: "PICK", side: "RED", index: 4 },
+  { type: "PICK", side: "BLUE", index: 4 },
+];
+
+const shuffleArray = <T,>(array: T[]): T[] => {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
   }
-
-  // 2. AI chọn tướng cho từng vai trò trong danh sách tướng không bị cấm
-  for (const role of roles) {
-    const roleChamps = CHAMPIONS.filter(c => c.role === role && !bans.includes(c.id));
-    if (roleChamps.length > 0) {
-      if (championTiers) {
-        roleChamps.sort((a, b) => {
-          const getPower = (cid: string) => {
-            const t = championTiers[cid] || "B";
-            if (t === "S") return 10;
-            if (t === "A") return 8;
-            if (t === "B") return 7;
-            if (t === "C") return 6;
-            if (t === "D") return 5;
-            return 3;
-          };
-          return getPower(b.id) - getPower(a.id);
-        });
-      } else {
-        roleChamps.sort((a, b) => b.metaPower - a.metaPower);
-      }
-      const topCount = Math.min(3, roleChamps.length);
-      const chosen = roleChamps[Math.floor(Math.random() * topCount)];
-      picks[role] = chosen.id;
-    } else {
-      picks[role] = CHAMPIONS.find(c => c.role === role)!.id;
-    }
-  }
-
-  return { bans, picks };
-}
+  return arr;
+};
 
 export default function DraftScreen({
   matchId,
@@ -84,58 +83,236 @@ export default function DraftScreen({
   championTiers,
   championImages
 }: DraftScreenProps) {
-  // Trạng thái cấm (tối đa 5 tướng)
-  const [bans, setBans] = useState<string[]>([]);
-  // Trạng thái chọn cho 5 role
-  const [picks, setPicks] = useState<Record<string, string>>({
-    TOP: "",
-    JUG: "",
-    MID: "",
-    BOT: "",
-    SUP: ""
+  // Trạng thái cấm/chọn riêng cho từng bên
+  const [blueBans, setBlueBans] = useState<string[]>([]);
+  const [redBans, setRedBans] = useState<string[]>([]);
+  const [bluePicks, setBluePicks] = useState<Record<string, string>>({
+    TOP: "", JUG: "", MID: "", BOT: "", SUP: ""
+  });
+  const [redPicks, setRedPicks] = useState<Record<string, string>>({
+    TOP: "", JUG: "", MID: "", BOT: "", SUP: ""
   });
 
-  // Khởi tạo lượt cấm/chọn của AI
-  const [opponentDraft] = useState<{ bans: string[]; picks: Record<string, string> }>(() => {
-    return generateAIChoice(opponentPlayers, championTiers);
+  // Tiến trình hiện tại (0 -> 19)
+  const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
+  
+  // Thứ tự chọn vị trí của AI đối phương (được xáo ngẫu nhiên để tăng tính thực tế)
+  const [opponentRoleOrder] = useState<string[]>(() => {
+    return shuffleArray(["TOP", "JUG", "MID", "BOT", "SUP"]);
   });
 
   const [activeRole, setActiveRole] = useState<string | null>(null);
-  const [isBanningPhase, setIsBanningPhase] = useState<boolean>(true);
+  const [isAiThinking, setIsAiThinking] = useState<boolean>(false);
 
-  const handleSelectChampForBan = (champId: string) => {
-    if (bans.includes(champId)) {
-      setBans(bans.filter(id => id !== champId));
-      return;
-    }
-    if (bans.length >= 5) return;
-    setBans([...bans, champId]);
-  };
+  // Đọc thông tin bước hiện tại
+  const currentStep = currentStepIndex < DRAFT_STEPS.length ? DRAFT_STEPS[currentStepIndex] : null;
+  const isUserTurn = currentStep ? currentStep.side === (isUserHome ? "BLUE" : "RED") : false;
 
-  const handleSelectChampForPick = (role: string, champId: string) => {
-    // Nếu tướng đã được pick cho role khác, gỡ ra
-    const newPicks = { ...picks };
-    Object.keys(newPicks).forEach(r => {
-      if (newPicks[r] === champId) {
-        newPicks[r] = "";
+  // Lấy dữ liệu thuộc về người chơi (Ta) và đối thủ (Địch)
+  const userBans = isUserHome ? blueBans : redBans;
+  const oppBans = isUserHome ? redBans : blueBans;
+  const userPicks = isUserHome ? bluePicks : redPicks;
+  const oppPicks = isUserHome ? redPicks : bluePicks;
+
+  // Tự động tìm vai trò trống đầu tiên cho người chơi khi đến lượt pick
+  const autoSelectActiveRole = (currentPicks: Record<string, string>) => {
+    const roles = ["TOP", "JUG", "MID", "BOT", "SUP"];
+    for (const r of roles) {
+      if (!currentPicks[r]) {
+        setActiveRole(r);
+        return r;
       }
-    });
-
-    newPicks[role] = champId;
-    setPicks(newPicks);
-    setActiveRole(null);
+    }
+    return null;
   };
 
-  // Danh sách các tướng khả dụng (chưa bị cấm)
-  const availableChamps = CHAMPIONS.filter(c => !bans.includes(c.id) && !opponentDraft.bans.includes(c.id));
+  // Thực hiện lượt cấm/chọn tự động của AI
+  const executeAITurn = (step: DraftStep) => {
+    const bPicks = Object.values(bluePicks);
+    const rPicks = Object.values(redPicks);
+    
+    // Tìm các tướng chưa bị cấm hoặc chọn bởi cả 2 bên
+    const available = CHAMPIONS.filter(
+      c => !blueBans.includes(c.id) &&
+           !redBans.includes(c.id) &&
+           !bPicks.includes(c.id) &&
+           !rPicks.includes(c.id)
+    );
 
-  // Kiểm tra cấm chọn hợp lệ
-  const isValid = bans.length === 5 && Object.values(picks).every(p => p !== "");
+    if (available.length === 0) return;
+
+    // Phân tích sức mạnh tướng dựa trên bảng xếp hạng (championTiers)
+    const getPower = (cid: string) => {
+      const t = championTiers[cid] || "B";
+      if (t === "S") return 10;
+      if (t === "A") return 8;
+      if (t === "B") return 7;
+      if (t === "C") return 6;
+      if (t === "D") return 5;
+      return 3;
+    };
+
+    if (step.type === "BAN") {
+      // AI cấm: Lọc tướng theo sức mạnh và chọn ngẫu nhiên trong top 5 tướng mạnh nhất
+      const sorted = [...available].sort((a, b) => getPower(b.id) - getPower(a.id));
+      const topCount = Math.min(5, sorted.length);
+      const chosen = sorted[Math.floor(Math.random() * topCount)];
+
+      if (step.side === "BLUE") {
+        setBlueBans(prev => [...prev, chosen.id]);
+      } else {
+        setRedBans(prev => [...prev, chosen.id]);
+      }
+      setCurrentStepIndex(prev => prev + 1);
+    } else {
+      // AI chọn: Tìm tướng thích hợp cho vai trò (role) được chỉ định trong opponentRoleOrder
+      const role = opponentRoleOrder[step.index];
+      let roleChamps = available.filter(c => c.role === role);
+      if (roleChamps.length === 0) {
+        roleChamps = available; // Dự phòng nếu hết tướng hợp vị trí
+      }
+
+      roleChamps.sort((a, b) => getPower(b.id) - getPower(a.id));
+      const topCount = Math.min(3, roleChamps.length);
+      const chosen = roleChamps[Math.floor(Math.random() * topCount)];
+
+      if (step.side === "BLUE") {
+        setBluePicks(prev => ({ ...prev, [role]: chosen.id }));
+      } else {
+        setRedPicks(prev => ({ ...prev, [role]: chosen.id }));
+      }
+      setCurrentStepIndex(prev => prev + 1);
+    }
+  };
+
+  // Quản lý luồng thời gian thực cho lượt của AI và Người chơi
+  useEffect(() => {
+    if (currentStepIndex >= DRAFT_STEPS.length) return;
+
+    const step = DRAFT_STEPS[currentStepIndex];
+    const isUserSide = step.side === (isUserHome ? "BLUE" : "RED");
+
+    if (!isUserSide) {
+      setIsAiThinking(true);
+      const timer = setTimeout(() => {
+        executeAITurn(step);
+        setIsAiThinking(false);
+      }, 1200); // 1.2 giây trì hoãn tự nhiên
+      return () => clearTimeout(timer);
+    } else {
+      // Đến lượt người chơi: Tự động trỏ vào vai trò trống đầu tiên nếu chưa chọn
+      if (step.type === "PICK") {
+        const uPicks = isUserHome ? bluePicks : redPicks;
+        if (!activeRole || uPicks[activeRole]) {
+          autoSelectActiveRole(uPicks);
+        }
+      }
+    }
+  }, [currentStepIndex, isUserHome, bluePicks, redPicks, activeRole]);
+
+  // Người chơi bấm cấm tướng
+  const handleSelectChampForBan = (champId: string) => {
+    const step = DRAFT_STEPS[currentStepIndex];
+    if (!step || step.type !== "BAN") return;
+    const isUserSide = step.side === (isUserHome ? "BLUE" : "RED");
+    if (!isUserSide) return;
+
+    if (isUserHome) {
+      setBlueBans(prev => [...prev, champId]);
+    } else {
+      setRedBans(prev => [...prev, champId]);
+    }
+    setCurrentStepIndex(prev => prev + 1);
+  };
+
+  // Người chơi bấm chọn tướng cho vai trò
+  const handleSelectChampForPick = (role: string, champId: string) => {
+    const step = DRAFT_STEPS[currentStepIndex];
+    if (!step || step.type !== "PICK") return;
+    const isUserSide = step.side === (isUserHome ? "BLUE" : "RED");
+    if (!isUserSide) return;
+
+    if (isUserHome) {
+      setBluePicks(prev => ({ ...prev, [role]: champId }));
+    } else {
+      setRedPicks(prev => ({ ...prev, [role]: champId }));
+    }
+    setActiveRole(null); // Reset vai trò để useEffect chọn cái tiếp theo
+    setCurrentStepIndex(prev => prev + 1);
+  };
+
+  // Click chọn tướng ở bảng danh sách
+  const handleChampClick = (champ: Champion) => {
+    if (isAiThinking || !currentStep || !isUserTurn) return;
+
+    const isBanned = blueBans.includes(champ.id) || redBans.includes(champ.id);
+    const isPicked = Object.values(bluePicks).includes(champ.id) || Object.values(redPicks).includes(champ.id);
+    if (isBanned || isPicked) return;
+
+    if (currentStep.type === "BAN") {
+      handleSelectChampForBan(champ.id);
+    } else {
+      const uPicks = isUserHome ? bluePicks : redPicks;
+      let targetRole = activeRole;
+      
+      // Nếu chưa kích hoạt vai trò hoặc vai trò đã có tướng, tự tìm vị trí trống
+      if (!targetRole || uPicks[targetRole]) {
+        targetRole = autoSelectActiveRole(uPicks);
+      }
+      
+      if (targetRole) {
+        handleSelectChampForPick(targetRole, champ.id);
+      }
+    }
+  };
+
+  // Kiểm tra cấm chọn hoàn thành (đã cấm đủ 5 tướng mỗi bên và chọn đủ 5 vị trí mỗi bên)
+  const isValid = currentStepIndex >= DRAFT_STEPS.length &&
+                  blueBans.length === 5 &&
+                  redBans.length === 5 &&
+                  Object.values(bluePicks).every(p => p !== "") &&
+                  Object.values(redPicks).every(p => p !== "");
 
   const handleSubmit = () => {
     if (!isValid) return;
-    onDraftComplete({ bans, picks }, opponentDraft);
+    if (isUserHome) {
+      onDraftComplete(
+        { bans: blueBans, picks: bluePicks },
+        { bans: redBans, picks: redPicks }
+      );
+    } else {
+      onDraftComplete(
+        { bans: redBans, picks: redPicks },
+        { bans: blueBans, picks: bluePicks }
+      );
+    }
   };
+
+  // Tạo thông báo trạng thái
+  const getStatusMessage = () => {
+    if (!currentStep) {
+      return "Cấm chọn hoàn tất! Hãy bấm nút Xác Nhận bên dưới để bắt đầu thi đấu.";
+    }
+
+    const sideName = currentStep.side === "BLUE" ? "Bên Xanh (Blue)" : "Bên Đỏ (Red)";
+    const typeName = currentStep.type === "BAN" ? "CẤM" : "CHỌN";
+    
+    // Map index sang số thứ tự tương ứng (1 đến 5)
+    const phaseNum = currentStep.type === "BAN"
+      ? `lượt cấm thứ ${currentStep.index + 1}`
+      : `lượt chọn thứ ${currentStep.index + 1}`;
+
+    if (isAiThinking) {
+      return `Đối thủ đang suy nghĩ (${sideName} thực hiện ${typeName})...`;
+    }
+
+    if (isUserTurn) {
+      return `Lượt của bạn: Thực hiện ${typeName} tướng cho ${sideName} (${phaseNum}).`;
+    }
+
+    return `Lượt đối thủ: Đang chờ ${sideName} thực hiện ${typeName} (${phaseNum})...`;
+  };
+
   return (
     <div className="w-full bg-zinc-950 text-zinc-100 p-6 rounded-xl border border-zinc-800 shadow-2xl relative overflow-hidden">
       {/* Glow Effect */}
@@ -162,6 +339,62 @@ export default function DraftScreen({
         </div>
       </div>
 
+      {/* Timeline Tiến trình Cấm Chọn */}
+      <div className="w-full bg-zinc-900/80 border border-zinc-850 rounded-xl p-4 mb-6 flex flex-col md:flex-row justify-between items-center gap-4 z-10 relative shadow-inner">
+        <div className="flex items-center gap-3">
+          <div className={`w-3 h-3 rounded-full ${
+            !currentStep 
+              ? "bg-emerald-500" 
+              : isAiThinking 
+              ? "bg-amber-500 animate-ping" 
+              : isUserTurn 
+              ? "bg-blue-500 animate-pulse" 
+              : "bg-red-500"
+          }`} />
+          <div>
+            <div className="text-[10px] uppercase font-bold tracking-wider text-zinc-500">
+              {currentStep ? `Tiến trình: Lượt ${currentStepIndex + 1} / 20` : "Trạng thái"}
+            </div>
+            <div className="text-sm font-black text-zinc-200">
+              {getStatusMessage()}
+            </div>
+          </div>
+        </div>
+        
+        {/* Thanh dấu tròn các bước cấm chọn */}
+        <div className="flex gap-1 flex-wrap justify-center">
+          {DRAFT_STEPS.map((step, idx) => {
+            const isCompleted = idx < currentStepIndex;
+            const isActive = idx === currentStepIndex;
+            const isBlue = step.side === "BLUE";
+            
+            return (
+              <div
+                key={idx}
+                title={`${step.side === "BLUE" ? "Bên Xanh" : "Bên Đỏ"} - ${step.type === "BAN" ? "Cấm" : "Chọn"}`}
+                className={`w-5 h-5 rounded-sm flex items-center justify-center text-[8px] font-extrabold select-none transition-all ${
+                  isActive
+                    ? "ring-2 ring-white scale-110 z-10 font-black shadow-lg"
+                    : ""
+                } ${
+                  isCompleted
+                    ? "bg-zinc-800 text-zinc-500 opacity-30 border border-zinc-700/50"
+                    : isBlue
+                    ? isActive
+                      ? "bg-blue-600 text-white animate-pulse"
+                      : "bg-blue-950/40 text-blue-400 border border-blue-900/40"
+                    : isActive
+                    ? "bg-rose-600 text-white animate-pulse"
+                    : "bg-rose-950/40 text-rose-450 border border-rose-900/40"
+                }`}
+              >
+                {step.type === "BAN" ? "C" : "P"}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 z-10 relative">
         {/* Cột trái: Lượt cấm & Chọn của bạn */}
         <div className="lg:col-span-1 space-y-4">
@@ -170,28 +403,25 @@ export default function DraftScreen({
               <CardTitle className="text-sm font-bold flex items-center justify-between text-zinc-200">
                 <div className="flex items-center gap-2">
                   <TeamLogo teamName={userTeamName} size={36} />
-                  <span>LƯỢT CẤM CỦA BẠN ({bans.length}/5)</span>
+                  <span>CẤM CỦA BẠN ({userBans.length}/5)</span>
                 </div>
-                {isBanningPhase && <Badge className="bg-amber-600 animate-pulse text-[10px]">Đang Cấm</Badge>}
+                {isUserTurn && currentStep?.type === "BAN" && (
+                  <Badge className="bg-amber-600 animate-pulse text-[10px]">Đang Cấm</Badge>
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent className="py-4 grid grid-cols-5 gap-2">
               {[0, 1, 2, 3, 4].map(idx => {
-                const champId = bans[idx];
+                const champId = userBans[idx];
                 const champ = CHAMPIONS.find(c => c.id === champId);
                 return (
                   <div
                     key={idx}
-                    className="aspect-square bg-zinc-950 border border-zinc-800 rounded flex flex-col items-center justify-center relative overflow-hidden cursor-pointer hover:border-red-950 group"
-                    onClick={() => {
-                      if (champId) handleSelectChampForBan(champId);
-                      else setIsBanningPhase(true);
-                    }}
+                    className="aspect-square bg-zinc-950 border border-zinc-800 rounded flex flex-col items-center justify-center relative overflow-hidden"
                   >
                     {champ ? (
                       <>
                         <div className="text-[10px] font-bold text-red-500 truncate px-0.5 z-10">{champ.name}</div>
-                        <XCircle className="w-4 h-4 text-red-700 absolute opacity-0 group-hover:opacity-100 transition-opacity z-20" />
                         <div className="absolute inset-0 bg-red-950/20" />
                       </>
                     ) : (
@@ -209,29 +439,33 @@ export default function DraftScreen({
             </CardHeader>
             <CardContent className="py-3 space-y-3">
               {["TOP", "JUG", "MID", "BOT", "SUP"].map(role => {
-                const champId = picks[role];
+                const champId = userPicks[role];
                 const champ = CHAMPIONS.find(c => c.id === champId);
                 const isActive = activeRole === role;
 
-                // Opponent's champ at this role
-                const oppChampId = opponentDraft.picks[role];
+                // Tướng tương ứng của đối thủ
+                const oppChampId = oppPicks[role];
                 const oppChamp = CHAMPIONS.find(c => c.id === oppChampId);
 
-                // Counters check
+                // Kiểm tra khắc chế
                 const isUserCounter = champ && oppChamp && champ.counters.includes(oppChamp.id);
                 const isOpponentCounter = champ && oppChamp && oppChamp.counters.includes(champ.id);
 
                 return (
                   <div
                     key={role}
-                    className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-all ${
+                    className={`flex items-center justify-between p-3 rounded-lg border transition-all ${
                       isActive
                         ? "border-blue-500 bg-blue-950/20 shadow-md shadow-blue-950/50"
-                        : "border-zinc-800 bg-zinc-950/50 hover:bg-zinc-800/30"
+                        : champId
+                        ? "border-zinc-850 bg-zinc-950/70"
+                        : "border-zinc-800 bg-zinc-950/30 hover:bg-zinc-900/50 cursor-pointer"
                     }`}
                     onClick={() => {
-                      setIsBanningPhase(false);
-                      setActiveRole(role);
+                      // Chỉ cho phép đổi active role nếu đó là vị trí trống và đang trong lượt pick của người chơi
+                      if (!champId && isUserTurn && currentStep?.type === "PICK") {
+                        setActiveRole(role);
+                      }
                     }}
                   >
                     <div className="flex items-center gap-3">
@@ -249,12 +483,12 @@ export default function DraftScreen({
                           {champ.type === "Enchanter" && <Wand2 className="w-7 h-7 text-emerald-400/70" />}
                         </div>
                       ) : (
-                        <div className="w-14 h-14 rounded bg-zinc-900 border border-zinc-800 flex items-center justify-center font-bold text-xs text-zinc-400 flex-shrink-0">
+                        <div className="w-14 h-14 rounded bg-zinc-900 border border-zinc-850 flex items-center justify-center font-bold text-xs text-zinc-500 flex-shrink-0">
                           {role}
                         </div>
                       )}
                       <div>
-                        <div className="text-xs font-semibold text-zinc-400">{role}</div>
+                        <div className="text-xs font-semibold text-zinc-555">{role}</div>
                         <div className="text-sm font-bold text-zinc-200">
                           {champ ? champ.name : <span className="text-zinc-650 font-medium">Chưa Chọn</span>}
                         </div>
@@ -262,7 +496,7 @@ export default function DraftScreen({
                     </div>
                     {champ && (
                       <div className="flex flex-col items-end gap-1">
-                        <Badge className="bg-zinc-800 text-[10px] border-zinc-700 text-zinc-400 font-normal">
+                        <Badge className="bg-zinc-850 text-[10px] border-zinc-800 text-zinc-400 font-normal">
                           {champ.type}
                         </Badge>
                         {isUserCounter && (
@@ -287,56 +521,53 @@ export default function DraftScreen({
         {/* Khu vực giữa: Bảng tướng để chọn */}
         <div className="lg:col-span-3 space-y-4">
           <Card className="bg-zinc-900/90 border-zinc-800 flex-grow">
-            <CardHeader className="py-4 border-b border-zinc-800 bg-zinc-900 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <CardHeader className="py-4 border-b border-zinc-800 bg-zinc-900 flex justify-between items-center">
               <div>
                 <CardTitle className="text-base font-bold text-zinc-200">
-                  {isBanningPhase ? "CHỌN TƯỚNG ĐỂ CẤM" : `CHỌN TƯỚNG CHO VỊ TRÍ: ${activeRole || "HÃY CLICK VÀO MỘT VỊ TRÍ BÊN TRÁI"}`}
+                  {currentStep 
+                    ? (currentStep.type === "BAN" 
+                      ? "DANH SÁCH TƯỚNG CẤM" 
+                      : `CHỌN TƯỚNG CHO VỊ TRÍ: ${activeRole || "HÃY CHỌN VỊ TRÍ"}`)
+                    : "CẤM CHỌN HOÀN TẤT"}
                 </CardTitle>
                 <p className="text-xs text-zinc-500 mt-0.5">
-                  Click vào tướng bên dưới để {isBanningPhase ? "Cấm" : "Chọn cho vị trí đã chọn"}.
+                  {currentStep 
+                    ? (currentStep.type === "BAN" 
+                      ? "Lượt cấm: Click vào tướng để cấm thi đấu." 
+                      : "Lượt chọn: Click vào tướng hợp lệ để xác nhận.")
+                    : "Tất cả các lượt cấm chọn đã được hoàn tất."}
                 </p>
               </div>
-
-              <div className="flex gap-2 text-xs">
-                <Button
-                  size="sm"
-                  variant={isBanningPhase ? "destructive" : "outline"}
-                  onClick={() => {
-                    setIsBanningPhase(true);
-                    setActiveRole(null);
-                  }}
-                  className="font-bold text-xs"
-                >
-                  Giai đoạn Cấm
-                </Button>
-                <Button
-                  size="sm"
-                  variant={!isBanningPhase && activeRole ? "default" : "outline"}
-                  onClick={() => {
-                    setIsBanningPhase(false);
-                    if (!activeRole) setActiveRole("TOP");
-                  }}
-                  className="font-bold text-xs bg-blue-600 hover:bg-blue-500"
-                >
-                  Giai đoạn Chọn
-                </Button>
+              <div>
+                {currentStep && (
+                  <Badge className={currentStep.type === "BAN" ? "bg-red-950 text-red-400 border border-red-800/40" : "bg-blue-950 text-blue-400 border border-blue-800/40"}>
+                    {currentStep.type === "BAN" ? "GIAI ĐOẠN CẤM" : "GIAI ĐOẠN CHỌN"}
+                  </Badge>
+                )}
               </div>
             </CardHeader>
             <CardContent className="py-6">
-              {/* Lọc tướng theo vị trí nếu đang ở chế độ chọn */}
               <div className="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-8 gap-3 max-h-[360px] overflow-y-auto pr-2">
                 {CHAMPIONS.map(champ => {
-                  const isUserBanned = bans.includes(champ.id);
-                  const isOpponentBanned = opponentDraft.bans.includes(champ.id);
+                  const isUserBanned = userBans.includes(champ.id);
+                  const isOpponentBanned = oppBans.includes(champ.id);
                   const isBanned = isUserBanned || isOpponentBanned;
 
-                  const isUserPicked = Object.values(picks).includes(champ.id);
-                  const isOpponentPicked = Object.values(opponentDraft.picks).includes(champ.id);
+                  const isUserPicked = Object.values(userPicks).includes(champ.id);
+                  const isOpponentPicked = Object.values(oppPicks).includes(champ.id);
                   const isPicked = isUserPicked || isOpponentPicked;
                   
-                  // Chỉ hiển thị tướng hợp vị trí nếu đang chọn role (hoặc hiển thị tất cả để linh hoạt)
-                  const isRoleMatch = !isBanningPhase && activeRole && champ.role === activeRole;
+                  const isRoleMatch = currentStep?.type === "PICK" && activeRole && champ.role === activeRole;
                   const champTier = championTiers[champ.id] || "B";
+
+                  // Lớp CSS màu viền/nền tương ứng với màu phe (Xanh/Đỏ) của người chọn
+                  const userColorClass = isUserHome
+                    ? "border-blue-500 bg-blue-950/30 opacity-70 cursor-not-allowed"
+                    : "border-rose-500 bg-rose-950/30 opacity-70 cursor-not-allowed";
+
+                  const opponentColorClass = isUserHome
+                    ? "border-rose-500 bg-rose-950/30 opacity-70 cursor-not-allowed"
+                    : "border-blue-500 bg-blue-950/30 opacity-70 cursor-not-allowed";
 
                   return (
                     <div
@@ -345,21 +576,14 @@ export default function DraftScreen({
                         isBanned
                           ? "border-red-950/85 bg-red-950/15 opacity-40 cursor-not-allowed"
                           : isUserPicked
-                          ? "border-blue-500 bg-blue-950/30 opacity-70"
+                          ? userColorClass
                           : isOpponentPicked
-                          ? "border-rose-500 bg-rose-950/30 opacity-70 cursor-not-allowed"
+                          ? opponentColorClass
                           : isRoleMatch
                           ? "border-emerald-700 bg-emerald-950/20 hover:border-emerald-500"
                           : "border-zinc-800 bg-zinc-950/80 hover:border-zinc-700"
                       }`}
-                      onClick={() => {
-                        if (isBanned || isOpponentPicked) return;
-                        if (isBanningPhase) {
-                          handleSelectChampForBan(champ.id);
-                        } else if (activeRole) {
-                          handleSelectChampForPick(activeRole, champ.id);
-                        }
-                      }}
+                      onClick={() => handleChampClick(champ)}
                     >
                       <div className="flex justify-between items-center w-full px-0.5">
                         <span className="text-[9px] text-zinc-500 font-bold uppercase">{champ.role}</span>
@@ -370,7 +594,7 @@ export default function DraftScreen({
                           champTier === "C" ? "text-emerald-400" : "text-slate-400"
                         }`}>{champTier}</span>
                       </div>
-                      {/* Type Icon / Custom Image (LARGER SIZES) */}
+                      
                       {championImages?.[champ.id] ? (
                         <div className="w-16 h-16 rounded-lg overflow-hidden border border-zinc-800 my-0.5 relative z-10 shadow-md">
                           <img src={championImages[champ.id]} alt={champ.name} className="w-full h-full object-cover" />
@@ -385,9 +609,9 @@ export default function DraftScreen({
                           {champ.type === "Enchanter" && <Wand2 className="w-9 h-9 text-emerald-400/70" />}
                         </div>
                       )}
+                      
                       <div className="text-[10px] font-bold text-zinc-200 leading-tight">{champ.name}</div>
                       
-                      {/* Thể hiện Tier ở một ô nhỏ phía dưới */}
                       <div className="w-full mt-0.5">
                         <span className={`text-[10px] font-black px-2 py-0.25 rounded-sm block w-full shadow-sm text-center select-none ${
                           champTier === "S" ? "bg-rose-600/90 text-white" :
@@ -412,7 +636,11 @@ export default function DraftScreen({
                       
                       {!isBanned && isOpponentPicked && (
                         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 rounded-lg">
-                          <span className="text-[9px] font-black text-rose-450 uppercase bg-rose-950/80 px-1 py-0.5 rounded border border-rose-900/30">
+                          <span className={`text-[9px] font-black uppercase px-1 py-0.5 rounded border ${
+                            isUserHome 
+                              ? "text-rose-450 bg-rose-950/80 border-rose-900/30" 
+                              : "text-blue-400 bg-blue-950/80 border-blue-900/30"
+                          }`}>
                             Đã Chọn (Địch)
                           </span>
                         </div>
@@ -420,7 +648,11 @@ export default function DraftScreen({
 
                       {!isBanned && isUserPicked && (
                         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 rounded-lg">
-                          <span className="text-[9px] font-black text-blue-400 uppercase bg-blue-950/80 px-1 py-0.5 rounded border border-blue-900/30">
+                          <span className={`text-[9px] font-black uppercase px-1 py-0.5 rounded border ${
+                            isUserHome 
+                              ? "text-blue-400 bg-blue-950/80 border-blue-900/30" 
+                              : "text-rose-450 bg-rose-950/80 border-rose-900/30"
+                          }`}>
                             Đã Chọn (Ta)
                           </span>
                         </div>
@@ -431,12 +663,11 @@ export default function DraftScreen({
               </div>
 
               {/* Thông tin tướng được chọn */}
-              {!isBanningPhase && activeRole && picks[activeRole] && (() => {
-                const selectedChamp = CHAMPIONS.find(c => c.id === picks[activeRole]);
+              {currentStep?.type === "PICK" && activeRole && userPicks[activeRole] && (() => {
+                const selectedChamp = CHAMPIONS.find(c => c.id === userPicks[activeRole]);
                 const selectedChampTier = selectedChamp ? (championTiers[selectedChamp.id] || "B") : "B";
                 
-                // Opponent's champion in this role
-                const oppChampId = opponentDraft.picks[activeRole];
+                const oppChampId = oppPicks[activeRole];
                 const oppChamp = CHAMPIONS.find(c => c.id === oppChampId);
 
                 const isCountering = selectedChamp && oppChamp && selectedChamp.counters.includes(oppChamp.id);
@@ -488,9 +719,9 @@ export default function DraftScreen({
           <div className="flex justify-end items-center gap-4 bg-zinc-900 border border-zinc-800 p-4 rounded-xl shadow-lg">
             <div className="text-xs text-zinc-400">
               {!isValid && (
-                <span>Hãy cấm đủ 5 tướng và chọn đủ 5 vị trí để tiếp tục thi đấu!</span>
+                <span>Đang trong giai đoạn cấm chọn. Hãy hoàn thành tất cả các lượt để tiếp tục.</span>
               )}
-              {isValid && <span className="text-emerald-400 font-semibold">Đội hình sẵn sàng! Bấm nút bên phải để vào trận đấu.</span>}
+              {isValid && <span className="text-emerald-400 font-semibold">Đội hình sẵn sàng! Bấm nút bên phải để bắt đầu trận đấu.</span>}
             </div>
             <Button
               className="bg-emerald-600 hover:bg-emerald-500 font-bold px-8 py-5 rounded-lg text-sm flex items-center gap-2 shadow-lg shadow-emerald-900/30"
@@ -510,14 +741,16 @@ export default function DraftScreen({
               <CardTitle className="text-sm font-bold flex items-center justify-between text-zinc-200">
                 <div className="flex items-center gap-2">
                   <TeamLogo teamName={opponentTeamName} size={36} />
-                  <span>LƯỢT CẤM ĐỐI THỦ ({opponentDraft.bans.length}/5)</span>
+                  <span>CẤM ĐỐI THỦ ({oppBans.length}/5)</span>
                 </div>
-                {!isBanningPhase && <Badge className="bg-red-900 text-red-200 text-[10px]">Cấm xong</Badge>}
+                {!isUserTurn && currentStep?.type === "BAN" && (
+                  <Badge className="bg-rose-600 animate-pulse text-[10px]">Đang Cấm</Badge>
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent className="py-4 grid grid-cols-5 gap-2">
               {[0, 1, 2, 3, 4].map(idx => {
-                const champId = opponentDraft.bans[idx];
+                const champId = oppBans[idx];
                 const champ = CHAMPIONS.find(c => c.id === champId);
                 return (
                   <div
@@ -544,11 +777,11 @@ export default function DraftScreen({
             </CardHeader>
             <CardContent className="py-3 space-y-3">
               {["TOP", "JUG", "MID", "BOT", "SUP"].map(role => {
-                const champId = opponentDraft.picks[role];
+                const champId = oppPicks[role];
                 const champ = CHAMPIONS.find(c => c.id === champId);
 
-                // User's champ at this role to show counter perspective from opponent
-                const userChampId = picks[role];
+                // Tướng tương ứng của người chơi để tính khắc chế theo góc nhìn của địch
+                const userChampId = userPicks[role];
                 const userChamp = CHAMPIONS.find(c => c.id === userChampId);
 
                 const isOpponentCounter = champ && userChamp && champ.counters.includes(userChamp.id);

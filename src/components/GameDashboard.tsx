@@ -506,58 +506,6 @@ export default function GameDashboard({
   // Ước lượng tổng quỹ lương
   const currentTotalSalary = userTeam.players.reduce((sum, p) => sum + p.salary, 0);
 
-  // --- RENDERING DRAFT HOẶC MATCH LIVE ---
-  if (draftMode && matchDayState) {
-    const match = userMatches.find(m => m.id === matchDayState.matchId);
-    const opponentName = match?.homeTeamId === userTeam.id ? match?.awayTeam.name : match?.homeTeam.name;
-    const isUserHome = match?.homeTeamId === userTeam.id;
-    const opponentTeamId = isUserHome ? match?.awayTeamId : match?.homeTeamId;
-    const opponentTeam = allTeamsInRegion.find(t => t.id === opponentTeamId);
-    const opponentPlayers = opponentTeam?.players || [];
-
-    return (
-      <div className="min-h-screen bg-zinc-950 p-6 flex items-center justify-center">
-        <DraftScreen
-          matchId={matchDayState.matchId}
-          homeTeamName={match?.homeTeam.name || ""}
-          awayTeamName={match?.awayTeam.name || ""}
-          isUserHome={!!isUserHome}
-          userTeamName={userTeam.name}
-          opponentTeamName={opponentName || ""}
-          opponentPlayers={opponentPlayers}
-          onDraftComplete={handleDraftComplete}
-          isPending={isPending}
-          championTiers={championTiers}
-          championImages={championImages}
-        />
-      </div>
-    );
-  }
-
-  if (matchResult && matchDayState) {
-    const match = userMatches.find(m => m.id === matchDayState.matchId);
-    const opponentName = match?.homeTeamId === userTeam.id ? match?.awayTeam.name : match?.homeTeam.name;
-    const isUserHome = match?.homeTeamId === userTeam.id;
-
-    return (
-      <div className="h-screen max-h-screen overflow-hidden bg-zinc-950 p-4 lg:p-6 flex items-center justify-center">
-        <div className="w-full max-w-6xl">
-          <MatchLiveScreen
-            result={matchResult}
-            homeTeamName={match?.homeTeam.name || ""}
-            awayTeamName={match?.awayTeam.name || ""}
-            isUserHome={!!isUserHome}
-            onClose={() => {
-              setMatchResult(null);
-              setMatchDayState(null);
-              setActiveTab("inbox");
-            }}
-          />
-        </div>
-      </div>
-    );
-  }
-
   // --- DATABASE EXPLORER CALCULATIONS ---
   const allSavePlayers = React.useMemo(() => {
     const list: (Player & { teamName?: string; teamLogoUrl?: string | null })[] = [];
@@ -676,6 +624,58 @@ export default function GameDashboard({
     }
     return result;
   }, [allSavePlayers, allTeams, dbSearch, dbRegionFilter, dbRoleFilter, dbSortField, dbSortOrder]);
+
+  // --- RENDERING DRAFT HOẶC MATCH LIVE ---
+  if (draftMode && matchDayState) {
+    const match = userMatches.find(m => m.id === matchDayState.matchId);
+    const opponentName = match?.homeTeamId === userTeam.id ? match?.awayTeam.name : match?.homeTeam.name;
+    const isUserHome = match?.homeTeamId === userTeam.id;
+    const opponentTeamId = isUserHome ? match?.awayTeamId : match?.homeTeamId;
+    const opponentTeam = allTeamsInRegion.find(t => t.id === opponentTeamId);
+    const opponentPlayers = opponentTeam?.players || [];
+
+    return (
+      <div className="min-h-screen bg-zinc-950 p-6 flex items-center justify-center">
+        <DraftScreen
+          matchId={matchDayState.matchId}
+          homeTeamName={match?.homeTeam.name || ""}
+          awayTeamName={match?.awayTeam.name || ""}
+          isUserHome={!!isUserHome}
+          userTeamName={userTeam.name}
+          opponentTeamName={opponentName || ""}
+          opponentPlayers={opponentPlayers}
+          onDraftComplete={handleDraftComplete}
+          isPending={isPending}
+          championTiers={championTiers}
+          championImages={championImages}
+        />
+      </div>
+    );
+  }
+
+  if (matchResult && matchDayState) {
+    const match = userMatches.find(m => m.id === matchDayState.matchId);
+    const opponentName = match?.homeTeamId === userTeam.id ? match?.awayTeam.name : match?.homeTeam.name;
+    const isUserHome = match?.homeTeamId === userTeam.id;
+
+    return (
+      <div className="h-screen max-h-screen overflow-hidden bg-zinc-950 p-4 lg:p-6 flex items-center justify-center">
+        <div className="w-full max-w-6xl">
+          <MatchLiveScreen
+            result={matchResult}
+            homeTeamName={match?.homeTeam.name || ""}
+            awayTeamName={match?.awayTeam.name || ""}
+            isUserHome={!!isUserHome}
+            onClose={() => {
+              setMatchResult(null);
+              setMatchDayState(null);
+              setActiveTab("inbox");
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans">

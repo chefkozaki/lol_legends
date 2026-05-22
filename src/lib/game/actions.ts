@@ -1467,6 +1467,34 @@ export async function readMailAction(mailId: string) {
   }
 }
 
+// Action xóa thư
+export async function deleteMailAction(mailId: string) {
+  try {
+    const currentUser = await getCurrentUser();
+    if (!currentUser) throw new Error("Vui lòng đăng nhập trước.");
+
+    const mail = await db.mail.findUnique({
+      where: { id: mailId }
+    });
+
+    if (!mail) throw new Error("Không tìm thấy thư.");
+    
+    // Chỉ cho phép xóa nếu thư thuộc về user hiện tại
+    if (mail.userId !== currentUser.id) {
+      throw new Error("Bạn không có quyền xóa thư này.");
+    }
+
+    await db.mail.delete({
+      where: { id: mailId }
+    });
+
+    revalidatePath("/");
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
 // 5. Action đàm phán chuyển nhượng tuyển thủ tự do
 export async function signFreeAgentAction(playerId: string) {
   try {
@@ -1727,6 +1755,87 @@ export async function getChampionTiersAction() {
       imageMap[champ.id] = "";
     }
     return { success: true, tiers: tierMap, images: imageMap };
+  }
+}
+
+// 8. Action đổi tên đội tuyển (user thường)
+export async function renameTeamAction(teamId: string, newName: string) {
+  try {
+    const currentUser = await getCurrentUser();
+    if (!currentUser) throw new Error("Vui lòng đăng nhập trước.");
+
+    const gameState = await db.gameState.findUnique({
+      where: { userId: currentUser.id }
+    });
+    if (!gameState || !gameState.userTeamId) throw new Error("Chưa chọn đội");
+
+    // Chỉ cho phép đổi tên đội của chính user
+    if (teamId !== gameState.userTeamId) {
+      throw new Error("Bạn chỉ có thể đổi tên đội tuyển của mình.");
+    }
+
+    const trimmedName = newName.trim();
+    if (!trimmedName) throw new Error("Tên đội tuyển không được để trống.");
+    if (trimmedName.length > 40) throw new Error("Tên đội tuyển không được quá 40 ký tự.");
+
+    // Kiểm tra tên trùng lặp trong save game của user
+    const existingTeam = await db.team.findFirst({
+      where: { name: trimmedName, userId: currentUser.id, NOT: { id: teamId } }
+    });
+    if (existingTeam) throw new Error("Đã có đội tuyển khác cùng tên trong save game của bạn.");
+
+    await db.team.update({
+      where: { id: teamId },
+      data: { name: trimmedName }
+    });
+
+    revalidatePath("/");
+    return { success: true };
+  } catch (error: any) {
+    console.error("Lỗi đổi tên đội tuyển:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// 9. Action đổi tên tuyển thủ (user thường)
+export async function renamePlayerAction(playerId: string, newName: string, newRealName?: string) {
+  try {
+    const currentUser = await getCurrentUser();
+    if (!currentUser) throw new Error("Vui lòng đăng nhập trước.");
+
+    const gameState = await db.gameState.findUnique({
+      where: { userId: currentUser.id }
+    });
+    if (!gameState || !gameState.userTeamId) throw new Error("Chưa chọn đội");
+
+    // Chỉ cho phép đổi tên tuyển thủ thuộc đội của user
+    const player = await db.player.findUnique({
+      where: { id: playerId, userId: currentUser.id }
+    });
+    if (!player) throw new Error("Không tìm thấy tuyển thủ.");
+    if (player.teamId !== gameState.userTeamId) {
+      throw new Error("Bạn chỉ có thể đổi tên tuyển thủ thuộc đội tuyển của mình.");
+    }
+
+    const trimmedName = newName.trim();
+    if (!trimmedName) throw new Error("Tên tuyển thủ không được để trống.");
+    if (trimmedName.length > 30) throw new Error("Tên tuyển thủ không được quá 30 ký tự.");
+
+    const updateData: { name: string; realName?: string } = { name: trimmedName };
+    if (newRealName !== undefined) {
+      updateData.realName = newRealName.trim() || null as any;
+    }
+
+    await db.player.update({
+      where: { id: playerId },
+      data: updateData
+    });
+
+    revalidatePath("/");
+    return { success: true };
+  } catch (error: any) {
+    console.error("Lỗi đổi tên tuyển thủ:", error);
+    return { success: false, error: error.message };
   }
 }
 

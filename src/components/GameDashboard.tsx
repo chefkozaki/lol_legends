@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useTransition, useEffect } from "react";
-import { advanceDayAction, readMailAction, signFreeAgentAction, releasePlayerAction, submitDraftAndPlayAction } from "@/lib/game/actions";
+import { advanceDayAction, readMailAction, deleteMailAction, signFreeAgentAction, releasePlayerAction, submitDraftAndPlayAction, renameTeamAction, renamePlayerAction } from "@/lib/game/actions";
 import { MatchSimulationResult } from "@/lib/game/engine";
 import { logoutAction } from "@/lib/game/authActions";
 import { adminUpdatePlayerAction, adminUpdateTeamAction, adminGetUsersAction, adminDeleteUserAction, adminCreateTeamAction, adminCreatePlayerAction, adminUpdateChampionTiersAction, adminSendGlobalMailAction } from "@/lib/game/adminActions";
@@ -20,6 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { 
+  LayoutDashboard,
   Mail as MailIcon, 
   Users, 
   Settings2, 
@@ -44,7 +45,10 @@ import {
   UserCheck,
   Database,
   Trophy,
-  Send
+  Send,
+  Pencil,
+  Check,
+  X
 } from "lucide-react";
 
 interface Player {
@@ -170,13 +174,20 @@ export default function GameDashboard({
   initialChampionImages,
   initialTournaments
 }: GameDashboardProps) {
-  const [activeTab, setActiveTab] = useState<string>("inbox");
+  const [activeTab, setActiveTab] = useState<string>("overview");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [selectedMailId, setSelectedMailId] = useState<string | null>(allMails[0]?.id || null);
   const selectedMail = allMails.find(m => m.id === selectedMailId) || allMails[0] || null;
   const [autoMarkRead, setAutoMarkRead] = useState<boolean>(true);
 
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
+
+  // Inline rename states
+  const [isEditingTeamName, setIsEditingTeamName] = useState(false);
+  const [editTeamName, setEditTeamName] = useState("");
+  const [isEditingPlayerName, setIsEditingPlayerName] = useState(false);
+  const [editPlayerName, setEditPlayerName] = useState("");
+  const [editPlayerRealName, setEditPlayerRealName] = useState("");
   
   // Champion Tiers State
   const [championTiers, setChampionTiers] = useState<Record<string, string>>(initialChampionTiers || {});
@@ -253,6 +264,7 @@ export default function GameDashboard({
   const [adminTeamName, setAdminTeamName] = useState<string>("");
   const [adminTeamRegion, setAdminTeamRegion] = useState<string>("LCK");
   const [adminTeamForm, setAdminTeamForm] = useState({
+    name: "",
     budget: 5000000,
     salaryCap: 10000000,
     wins: 0,
@@ -346,6 +358,7 @@ export default function GameDashboard({
       if (t) {
         setTimeout(() => {
           setAdminTeamForm({
+            name: t.name,
             budget: t.budget,
             salaryCap: t.salaryCap,
             wins: t.wins,
@@ -390,6 +403,7 @@ export default function GameDashboard({
         setAdminTeamName("");
         setAdminTeamRegion("LCK");
         setAdminTeamForm({
+          name: "",
           budget: 5000000,
           salaryCap: 10000000,
           wins: 0,
@@ -569,6 +583,19 @@ export default function GameDashboard({
     });
   };
 
+  const handleDeleteMail = (mailId: string) => {
+    if (!confirm("Bạn có chắc chắn muốn xóa thư này? Thao tác này không thể hoàn tác.")) return;
+    startTransition(async () => {
+      const res = await deleteMailAction(mailId);
+      if (res.success) {
+        const remainingMails = allMails.filter(m => m.id !== mailId);
+        setSelectedMailId(remainingMails[0]?.id || null);
+      } else {
+        alert("Lỗi xóa thư: " + res.error);
+      }
+    });
+  };
+
   // 3. Ký hợp đồng tuyển thủ tự do
   const handleSignPlayer = (playerId: string) => {
     setErrorMsg(null);
@@ -594,6 +621,52 @@ export default function GameDashboard({
         setSelectedPlayer(null);
       }
     });
+  };
+
+  // 4b. Đổi tên đội tuyển
+  const handleStartEditTeamName = () => {
+    setEditTeamName(userTeam.name);
+    setIsEditingTeamName(true);
+  };
+  const handleConfirmEditTeamName = () => {
+    if (!editTeamName.trim()) return;
+    startTransition(async () => {
+      const res = await renameTeamAction(userTeam.id, editTeamName);
+      if (res.success) {
+        setIsEditingTeamName(false);
+      } else {
+        setErrorMsg(res.error || "Lỗi đổi tên đội tuyển.");
+      }
+    });
+  };
+  const handleCancelEditTeamName = () => {
+    setIsEditingTeamName(false);
+    setEditTeamName("");
+  };
+
+  // 4c. Đổi tên tuyển thủ
+  const handleStartEditPlayerName = () => {
+    if (!selectedPlayer) return;
+    setEditPlayerName(selectedPlayer.name);
+    setEditPlayerRealName(selectedPlayer.realName || "");
+    setIsEditingPlayerName(true);
+  };
+  const handleConfirmEditPlayerName = () => {
+    if (!selectedPlayer || !editPlayerName.trim()) return;
+    startTransition(async () => {
+      const res = await renamePlayerAction(selectedPlayer.id, editPlayerName, editPlayerRealName);
+      if (res.success) {
+        setIsEditingPlayerName(false);
+        setSelectedPlayer(null);
+      } else {
+        setErrorMsg(res.error || "Lỗi đổi tên tuyển thủ.");
+      }
+    });
+  };
+  const handleCancelEditPlayerName = () => {
+    setIsEditingPlayerName(false);
+    setEditPlayerName("");
+    setEditPlayerRealName("");
   };
 
   // 5. Cấm chọn xong & bắt đầu giả lập trận đấu
@@ -885,7 +958,7 @@ export default function GameDashboard({
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans">
+    <div className="min-h-screen md:h-screen md:overflow-hidden bg-zinc-950 text-zinc-100 flex flex-col font-sans">
       {/* 1. HEADER */}
       <header className="bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex flex-col lg:flex-row justify-between items-center gap-4 z-10 shadow-md">
         <div className="flex items-center gap-4">
@@ -896,7 +969,41 @@ export default function GameDashboard({
               <Badge className="bg-zinc-800 text-zinc-400 border-zinc-700 text-[10px] py-0 font-normal">v1.0</Badge>
             </h1>
             <p className="text-xs text-zinc-400 font-semibold flex items-center gap-1.5">
-              Đội tuyển: <span className="text-emerald-400 font-bold">{userTeam.name}</span> ({userTeam.region})
+              Đội tuyển:{" "}
+              {isEditingTeamName ? (
+                <span className="inline-flex items-center gap-1">
+                  <Input
+                    type="text"
+                    value={editTeamName}
+                    onChange={(e) => setEditTeamName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleConfirmEditTeamName();
+                      if (e.key === "Escape") handleCancelEditTeamName();
+                    }}
+                    className="bg-zinc-950 border-zinc-700 text-emerald-400 text-xs font-bold h-6 w-40 px-1.5 py-0"
+                    autoFocus
+                    maxLength={40}
+                  />
+                  <button onClick={handleConfirmEditTeamName} className="text-emerald-400 hover:text-emerald-300 transition-colors" title="Xác nhận">
+                    <Check className="w-3.5 h-3.5" />
+                  </button>
+                  <button onClick={handleCancelEditTeamName} className="text-zinc-500 hover:text-zinc-300 transition-colors" title="Hủy">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 group">
+                  <span className="text-emerald-400 font-bold">{userTeam.name}</span>
+                  <button
+                    onClick={handleStartEditTeamName}
+                    className="text-zinc-600 hover:text-emerald-400 transition-colors opacity-0 group-hover:opacity-100"
+                    title="Đổi tên đội tuyển"
+                  >
+                    <Pencil className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+              {" "}({userTeam.region})
               <span className="text-zinc-600">|</span>
               HLV: <span className="text-zinc-200 font-bold">{currentUser?.displayName}</span>
               {currentUser?.role === "ADMIN" && (
@@ -976,6 +1083,25 @@ export default function GameDashboard({
               )}
             </Button>
           </div>
+
+          <Button
+            variant="ghost"
+            className={`justify-start ${isSidebarCollapsed ? "md:justify-center" : ""} gap-2.5 font-bold text-xs py-5 rounded-lg w-full relative transition-all duration-200 border group ${
+              activeTab === "overview"
+                ? "bg-emerald-950/40 border-emerald-500/40 text-emerald-400 shadow-lg shadow-emerald-950/20"
+                : "bg-transparent border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40 hover:border-zinc-700/30"
+            }`}
+            onClick={() => setActiveTab("overview")}
+            title={isSidebarCollapsed ? "Tổng Quan" : undefined}
+          >
+            {activeTab === "overview" && (
+              <span className="absolute left-0 top-3 bottom-3 w-1 bg-emerald-500 rounded-r animate-fade-in" />
+            )}
+            <LayoutDashboard className={`w-4 h-4 shrink-0 transition-colors duration-200 ${
+              activeTab === "overview" ? "text-emerald-400" : "text-zinc-500 group-hover:text-emerald-400"
+            }`} />
+            <span className={isSidebarCollapsed ? "md:hidden" : ""}>Tổng Quan</span>
+          </Button>
 
           <Button
             variant="ghost"
@@ -1159,6 +1285,374 @@ export default function GameDashboard({
         {/* NỘI DUNG CHÍNH */}
         <main className="flex-grow p-6 bg-zinc-950 overflow-y-auto z-0 relative">
           
+          {/* TAB 0: OVERVIEW (Tổng Quan) */}
+          {activeTab === "overview" && (
+            <div className="space-y-6 animate-fade-in">
+              {/* Header */}
+              <div className="mb-4">
+                <h2 className="text-2xl font-black tracking-tight text-zinc-100 uppercase">TỔNG QUAN CLB</h2>
+                <p className="text-xs text-zinc-400 mt-1">Chào mừng trở lại, HLV <span className="text-zinc-200 font-bold">{currentUser?.displayName}</span>. Hãy dẫn dắt <span className="text-emerald-400 font-bold">{userTeam.name}</span> chinh phục các đỉnh cao!</p>
+              </div>
+
+              {/* Layout grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+                {/* Cột trái: Đội hình & Lịch thi đấu (2/3 width) */}
+                <div className="lg:col-span-2 space-y-6">
+                  {/* Quỹ Lương & Đánh giá */}
+                  <Card className="bg-zinc-900 border-zinc-800 shadow-xl">
+                    <CardHeader className="pb-3 border-b border-zinc-800">
+                      <CardTitle className="text-xs font-black text-zinc-400 tracking-wider uppercase flex items-center gap-2">
+                        <DollarSign className="w-4 h-4 text-emerald-400" />
+                        Tài chính & Quỹ Lương
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-4 space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-zinc-950/60 p-3.5 rounded-lg border border-zinc-850">
+                          <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Ngân sách câu lạc bộ</span>
+                          <span className="text-lg font-black text-emerald-400 font-mono">${userTeam.budget.toLocaleString()}</span>
+                        </div>
+                        <div className="bg-zinc-950/60 p-3.5 rounded-lg border border-zinc-850">
+                          <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Chỉ số Roster (OVR)</span>
+                          <span className="text-lg font-black text-blue-400 font-mono">
+                            {userTeam.players.length > 0 
+                              ? Math.round(userTeam.players.reduce((sum, p) => sum + (p.laning + p.teamfight + p.macro + p.mentality + p.championPool) / 5, 0) / userTeam.players.length)
+                              : 0}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-xs font-semibold">
+                          <span className="text-zinc-400">Hạn mức lương năm:</span>
+                          <span className="text-zinc-200 font-mono">${currentTotalSalary.toLocaleString()} / ${userTeam.salaryCap.toLocaleString()}</span>
+                        </div>
+                        <div className="h-2 w-full bg-zinc-950 rounded-full overflow-hidden border border-zinc-850">
+                          <div 
+                            className={`h-full transition-all duration-300 ${
+                              (currentTotalSalary / userTeam.salaryCap) > 0.95 
+                                ? "bg-red-500" 
+                                : (currentTotalSalary / userTeam.salaryCap) > 0.8 
+                                  ? "bg-yellow-500" 
+                                  : "bg-emerald-500"
+                            }`}
+                            style={{ width: `${Math.min((currentTotalSalary / userTeam.salaryCap) * 100, 100)}%` }}
+                          />
+                        </div>
+                        <div className="flex justify-between text-[9px] text-zinc-500 font-bold uppercase tracking-wider">
+                          <span>Sử dụng</span>
+                          <span>{Math.round((currentTotalSalary / userTeam.salaryCap) * 100)}%</span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Đội hình thi đấu */}
+                  <Card className="bg-zinc-900 border-zinc-800 shadow-xl">
+                    <CardHeader className="pb-3 border-b border-zinc-800 flex flex-row justify-between items-center">
+                      <CardTitle className="text-xs font-black text-zinc-400 tracking-wider uppercase flex items-center gap-2">
+                        <Users className="w-4 h-4 text-emerald-400" />
+                        Đội hình tuyển thủ
+                      </CardTitle>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={() => setActiveTab("squad")}
+                        className="text-[10px] font-bold text-blue-400 hover:text-blue-300 hover:bg-zinc-800 h-7"
+                      >
+                        Quản lý đội hình
+                      </Button>
+                    </CardHeader>
+                    <CardContent className="pt-4">
+                      {userTeam.players.length === 0 ? (
+                        <div className="text-zinc-500 text-xs py-6 text-center font-semibold">Đội hình chưa có tuyển thủ nào. Hãy ký hợp đồng tuyển thủ.</div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {userTeam.players.map(p => {
+                            const ovr = Math.round((p.laning + p.teamfight + p.macro + p.mentality + p.championPool) / 5);
+                            return (
+                              <div 
+                                key={p.id} 
+                                onClick={() => setSelectedPlayer(p)}
+                                className="flex items-center gap-3 p-3 bg-zinc-950/40 hover:bg-zinc-950/80 rounded-xl border border-zinc-850 hover:border-zinc-700 transition-all duration-200 cursor-pointer"
+                              >
+                                <PlayerAvatar playerName={p.name} role={p.role} size={44} imageUrl={p.avatarUrl} />
+                                <div className="flex-grow min-w-0">
+                                  <h4 className="text-xs font-extrabold text-zinc-100 truncate">{p.name}</h4>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <Badge className="bg-zinc-800 text-zinc-400 border-none px-1 py-0 text-[8px] font-bold">{p.role}</Badge>
+                                    <span className="text-[10px] text-zinc-500 font-bold">{p.nationality}</span>
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <span className="text-[9px] font-bold text-zinc-500 uppercase block">OVR</span>
+                                  <span className="text-sm font-black text-blue-400 font-mono">{ovr}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Lịch thi đấu & Kết quả */}
+                  <Card className="bg-zinc-900 border-zinc-800 shadow-xl">
+                    <CardHeader className="pb-3 border-b border-zinc-800 flex flex-row justify-between items-center">
+                      <CardTitle className="text-xs font-black text-zinc-400 tracking-wider uppercase flex items-center gap-2">
+                        <Calendar className="w-4 h-4 text-emerald-400" />
+                        Lịch Thi Đấu & Kết Quả Gần Nhất
+                      </CardTitle>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={() => setActiveTab("schedule")}
+                        className="text-[10px] font-bold text-blue-400 hover:text-blue-300 hover:bg-zinc-800 h-7"
+                      >
+                        Xem chi tiết lịch thi đấu
+                      </Button>
+                    </CardHeader>
+                    <CardContent className="pt-4 space-y-4">
+                      {/* TRẬN ĐẤU TIẾP THEO */}
+                      <div>
+                        <span className="text-[10px] font-black text-zinc-500 uppercase tracking-wider block mb-2">Trận đấu kế tiếp</span>
+                        {(() => {
+                          const nextMatch = userMatches.find(m => !m.played);
+                          if (!nextMatch) {
+                            return (
+                              <div className="p-4 rounded-xl bg-zinc-950/40 border border-zinc-850 text-center text-zinc-500 text-xs font-semibold">
+                                Đã hoàn thành toàn bộ giải đấu mùa này.
+                              </div>
+                            );
+                          }
+                          const isUserHome = nextMatch.homeTeamId === userTeam.id;
+                          const oppClub = isUserHome ? nextMatch.awayTeam : nextMatch.homeTeam;
+                          const isToday = nextMatch.date === initialGameState.currentDate;
+                          
+                          return (
+                            <div className={`p-4 rounded-xl border transition-all ${
+                              isToday 
+                                ? "bg-emerald-950/20 border-emerald-500/40 shadow-lg shadow-emerald-950/10" 
+                                : "bg-zinc-950/40 border-zinc-850"
+                            }`}>
+                              <div className="flex justify-between items-center mb-3">
+                                <Badge className={isToday ? "bg-emerald-600 text-zinc-100 font-extrabold text-[9px]" : "bg-zinc-850 text-zinc-400 font-bold text-[9px]"}>
+                                  {isToday ? "HÔM NAY" : `TUẦN ${nextMatch.week}`}
+                                </Badge>
+                                <span className="text-[10px] text-zinc-500 font-semibold font-mono">{nextMatch.date}</span>
+                              </div>
+                              
+                              <div className="flex items-center justify-between gap-2 px-2">
+                                <div className="flex flex-col items-center gap-1.5 w-5/12">
+                                  <TeamLogo teamName={userTeam.name} size={48} imageUrl={userTeam.logoUrl} />
+                                  <span className="text-xs font-black text-zinc-100 truncate text-center w-full">{userTeam.name}</span>
+                                  <span className="text-[8px] font-bold text-zinc-500 uppercase">{isUserHome ? "SÂN NHÀ" : "SÂN KHÁCH"}</span>
+                                </div>
+                                
+                                <div className="text-center shrink-0 w-2/12 flex flex-col items-center">
+                                  <span className="text-xs font-black text-zinc-500">VS</span>
+                                </div>
+                                
+                                <div className="flex flex-col items-center gap-1.5 w-5/12">
+                                  <TeamLogo teamName={oppClub.name} size={48} imageUrl={oppClub.logoUrl} />
+                                  <span className="text-xs font-black text-zinc-200 truncate text-center w-full">{oppClub.name}</span>
+                                  <span className="text-[8px] font-bold text-zinc-500 uppercase">{isUserHome ? "SÂN KHÁCH" : "SÂN NHÀ"}</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      {/* KẾT QUẢ GẦN ĐÂY */}
+                      <div>
+                        <span className="text-[10px] font-black text-zinc-500 uppercase tracking-wider block mb-2">Kết quả các trận trước</span>
+                        {(() => {
+                          const recentMatches = [...userMatches].filter(m => m.played).reverse().slice(0, 2);
+                          if (recentMatches.length === 0) {
+                            return <div className="text-zinc-500 text-[11px] font-semibold py-2">Chưa thi đấu trận nào.</div>;
+                          }
+                          return (
+                            <div className="space-y-2">
+                              {recentMatches.map(match => {
+                                const isUserHome = match.homeTeamId === userTeam.id;
+                                const opponent = isUserHome ? match.awayTeam : match.homeTeam;
+                                const userScore = isUserHome ? match.homeScore : match.awayScore;
+                                const oppScore = isUserHome ? match.awayScore : match.homeScore;
+                                
+                                let isWin = false;
+                                if (match.matchEvents) {
+                                  try {
+                                    const parsed = JSON.parse(match.matchEvents);
+                                    isWin = isUserHome ? (parsed.winner === "HOME") : (parsed.winner === "AWAY");
+                                  } catch (e) {
+                                    isWin = userScore > oppScore;
+                                  }
+                                } else {
+                                  isWin = userScore > oppScore;
+                                }
+
+                                return (
+                                  <div key={match.id} className="flex items-center justify-between p-3 bg-zinc-950/30 border border-zinc-855 rounded-lg text-xs font-semibold">
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                      <Badge className={isWin ? "bg-emerald-950/60 text-emerald-400 border border-emerald-900/40 font-bold" : "bg-red-950/60 text-red-400 border border-red-900/40 font-bold"}>
+                                        {isWin ? "W" : "L"}
+                                      </Badge>
+                                      <TeamLogo teamName={opponent.name} size={28} imageUrl={opponent.logoUrl} />
+                                      <span className="text-zinc-300 truncate font-bold text-xs">{opponent.name}</span>
+                                    </div>
+                                    <div className="text-right shrink-0 flex flex-col items-end">
+                                      <span className="font-bold text-zinc-100 font-mono text-sm">{userScore} - {oppScore}</span>
+                                      <span className="text-[8px] text-zinc-500 font-bold font-mono">Tuần {match.week}</span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Cột phải: Bảng xếp hạng & Hộp thư (1/3 width) */}
+                <div className="space-y-6">
+                  {/* Bảng xếp hạng mini */}
+                  <Card className="bg-zinc-900 border-zinc-800 shadow-xl">
+                    <CardHeader className="pb-3 border-b border-zinc-800 flex flex-row justify-between items-center">
+                      <CardTitle className="text-xs font-black text-zinc-400 tracking-wider uppercase flex items-center gap-2">
+                        <Trophy className="w-4 h-4 text-emerald-400" />
+                        Xếp Hạng {userTeam.region}
+                      </CardTitle>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={() => setActiveTab("schedule")}
+                        className="text-[10px] font-bold text-blue-400 hover:text-blue-300 hover:bg-zinc-800 h-7"
+                      >
+                        Xem BXH đầy đủ
+                      </Button>
+                    </CardHeader>
+                    <CardContent className="pt-3">
+                      <Table>
+                        <TableHeader className="bg-transparent">
+                          <TableRow className="border-zinc-800 hover:bg-transparent">
+                            <TableHead className="w-10 text-center text-[10px] text-zinc-500 font-bold uppercase tracking-wider">XH</TableHead>
+                            <TableHead className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Đội tuyển</TableHead>
+                            <TableHead className="w-16 text-center text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Thắng/Thua</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody className="text-xs font-semibold">
+                          {(() => {
+                            const userRankIdx = sortedStandings.findIndex(t => t.id === userTeam.id);
+                            const showUserAtBottom = userRankIdx >= 5;
+                            const miniStandings = sortedStandings.slice(0, 5);
+                            
+                            return (
+                              <>
+                                {miniStandings.map((team, idx) => {
+                                  const isUser = team.id === userTeam.id;
+                                  return (
+                                    <TableRow key={team.id} className={`border-zinc-800 hover:bg-zinc-800/10 ${isUser ? "bg-blue-950/20 font-bold" : ""}`}>
+                                      <TableCell className="text-center font-bold text-zinc-400">{idx + 1}</TableCell>
+                                      <TableCell className={isUser ? "text-blue-400" : "text-zinc-200"}>
+                                        <div className="flex items-center gap-2">
+                                          <TeamLogo teamName={team.name} size={30} imageUrl={team.logoUrl} />
+                                          <span className="truncate">{team.name}</span>
+                                        </div>
+                                      </TableCell>
+                                      <TableCell className="text-center text-zinc-300 font-mono font-bold">{team.wins}W - {team.losses}L</TableCell>
+                                    </TableRow>
+                                  );
+                                })}
+                                {showUserAtBottom && (
+                                  <>
+                                    <TableRow className="hover:bg-transparent">
+                                      <TableCell colSpan={3} className="py-1 text-center text-[9px] text-zinc-600 font-bold uppercase tracking-widest select-none">
+                                        • • •
+                                      </TableCell>
+                                    </TableRow>
+                                    <TableRow key={userTeam.id} className="border-zinc-800 bg-blue-950/20 font-bold hover:bg-blue-950/30">
+                                      <TableCell className="text-center font-bold text-blue-400">{userRankIdx + 1}</TableCell>
+                                      <TableCell className="text-blue-400">
+                                        <div className="flex items-center gap-2">
+                                          <TeamLogo teamName={userTeam.name} size={30} imageUrl={userTeam.logoUrl} />
+                                          <span className="truncate">{userTeam.name}</span>
+                                        </div>
+                                      </TableCell>
+                                      <TableCell className="text-center text-blue-400 font-mono font-bold">
+                                        {sortedStandings[userRankIdx].wins}W - {sortedStandings[userRankIdx].losses}L
+                                      </TableCell>
+                                    </TableRow>
+                                  </>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+
+                  {/* Hộp thư gần đây */}
+                  <Card className="bg-zinc-900 border-zinc-800 shadow-xl">
+                    <CardHeader className="pb-3 border-b border-zinc-800 flex flex-row justify-between items-center">
+                      <CardTitle className="text-xs font-black text-zinc-400 tracking-wider uppercase flex items-center gap-2">
+                        <MailIcon className="w-4 h-4 text-emerald-400" />
+                        Hộp Thư Gần Đây
+                      </CardTitle>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={() => setActiveTab("inbox")}
+                        className="text-[10px] font-bold text-blue-400 hover:text-blue-300 hover:bg-zinc-800 h-7"
+                      >
+                        Hộp thư chi tiết
+                      </Button>
+                    </CardHeader>
+                    <CardContent className="pt-4 space-y-3">
+                      {(() => {
+                        const unreadMails = allMails.filter(m => !m.read);
+                        const recentMailsToShow = unreadMails.length > 0 
+                          ? unreadMails.slice(0, 3) 
+                          : allMails.slice(0, 3);
+                          
+                        if (recentMailsToShow.length === 0) {
+                          return <div className="text-zinc-650 text-xs py-6 text-center font-medium">Hộp thư trống</div>;
+                        }
+                        
+                        return recentMailsToShow.map(mail => (
+                          <div 
+                            key={mail.id}
+                            onClick={() => {
+                              setSelectedMailId(mail.id);
+                              setActiveTab("inbox");
+                            }}
+                            className={`p-3 rounded-lg border cursor-pointer transition-all duration-200 ${
+                              !mail.read 
+                                ? "bg-zinc-950/60 border-l-4 border-l-blue-500 border-zinc-850 hover:bg-zinc-950/80" 
+                                : "bg-zinc-950/20 border-zinc-850 hover:bg-zinc-950/40"
+                            }`}
+                          >
+                            <div className="flex justify-between items-start gap-2 mb-1">
+                              <span className="text-[9px] text-zinc-500 font-extrabold uppercase">{mail.sender}</span>
+                              <span className="text-[9px] text-zinc-500 font-mono">{mail.date}</span>
+                            </div>
+                            <h4 className={`text-xs ${!mail.read ? "font-extrabold text-zinc-100" : "font-semibold text-zinc-300"} truncate`}>
+                              {mail.title}
+                            </h4>
+                            <p className="text-[10px] text-zinc-500 truncate mt-1">{mail.content}</p>
+                          </div>
+                        ));
+                      })()}
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* TAB 1: INBOX (Hộp Thư) */}
           {activeTab === "inbox" && (
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 lg:h-[calc(100vh-160px)] items-stretch">
@@ -1211,16 +1705,27 @@ export default function GameDashboard({
                       <div className="flex justify-between items-center text-xs text-zinc-400 font-semibold mb-2">
                         <span>Người gửi: <span className="text-zinc-300 font-bold">{selectedMail.sender}</span></span>
                         <div className="flex items-center gap-3">
-                          {!selectedMail.read && (
+                          <div className="flex items-center gap-2">
+                            {!selectedMail.read && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleMarkMailAsRead(selectedMail.id)}
+                                className="h-7 text-[10px] font-bold text-blue-400 hover:text-blue-300 border-blue-900/50 hover:bg-blue-950/20"
+                              >
+                                Đánh dấu đã đọc
+                              </Button>
+                            )}
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => handleMarkMailAsRead(selectedMail.id)}
-                              className="h-7 text-[10px] font-bold text-blue-400 hover:text-blue-300 border-blue-900/50 hover:bg-blue-950/20"
+                              onClick={() => handleDeleteMail(selectedMail.id)}
+                              className="h-7 text-[10px] font-bold text-rose-400 hover:text-rose-300 border-rose-900/50 hover:bg-rose-950/20 flex items-center gap-1.5"
                             >
-                              Đánh dấu đã đọc
+                              <Trash2 className="w-3 h-3" />
+                              Xóa thư
                             </Button>
-                          )}
+                          </div>
                           <span className="font-mono">{selectedMail.date}</span>
                         </div>
                       </div>
@@ -1354,7 +1859,18 @@ export default function GameDashboard({
                         }`);
                       }}>
                         <SelectTrigger className="bg-zinc-950 border-zinc-800 text-zinc-200">
-                          <SelectValue placeholder="Chọn chiến thuật..." />
+                          <SelectValue placeholder="Chọn chiến thuật...">
+                            {(val) => {
+                              switch (val) {
+                                case "balanced": return "Cân bằng (Mặc định)";
+                                case "teamfight": return "Giao tranh tổng (Teamfight-focused)";
+                                case "objective": return "Kiểm soát mục tiêu (Objective-focused)";
+                                case "topside": return "Đẩy cánh trên (TOP/MID)";
+                                case "botside": return "Đẩy cánh dưới (BOT/SUP)";
+                                default: return val;
+                              }
+                            }}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent className="bg-zinc-900 border-zinc-850 text-zinc-200">
                           <SelectItem value="balanced">Cân bằng (Mặc định)</SelectItem>
@@ -1512,7 +2028,9 @@ export default function GameDashboard({
                   <span className="font-semibold text-zinc-400">Vị trí:</span>
                   <Select value={scoutingRoleFilter} onValueChange={(val) => setScoutingRoleFilter(val || "ALL")}>
                     <SelectTrigger className="bg-zinc-900 border-zinc-800 text-zinc-200 w-32">
-                      <SelectValue placeholder="Chọn vai trò..." />
+                      <SelectValue placeholder="Chọn vai trò...">
+                        {(val) => val === "ALL" ? "Tất cả" : val}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent className="bg-zinc-900 border-zinc-850 text-zinc-200">
                       <SelectItem value="ALL">Tất cả</SelectItem>
@@ -1856,7 +2374,9 @@ export default function GameDashboard({
                 <div className="w-[140px]">
                   <Select value={dbRegionFilter} onValueChange={(val) => setDbRegionFilter(val || "ALL")}>
                     <SelectTrigger className="bg-zinc-950 border-zinc-800 text-zinc-300 text-xs h-9 rounded-lg">
-                      <SelectValue placeholder="Khu vực" />
+                      <SelectValue placeholder="Khu vực">
+                        {(val) => val === "ALL" ? "Tất cả khu vực" : val}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-200">
                       <SelectItem value="ALL">Tất cả khu vực</SelectItem>
@@ -1874,7 +2394,19 @@ export default function GameDashboard({
                   <div className="w-[140px]">
                     <Select value={dbRoleFilter} onValueChange={(val) => setDbRoleFilter(val || "ALL")}>
                       <SelectTrigger className="bg-zinc-950 border-zinc-800 text-zinc-300 text-xs h-9 rounded-lg">
-                        <SelectValue placeholder="Vị trí" />
+                        <SelectValue placeholder="Vị trí">
+                          {(val) => {
+                            switch (val) {
+                              case "ALL": return "Tất cả vị trí";
+                              case "TOP": return "Đường trên (TOP)";
+                              case "JUG": return "Đi rừng (JUG)";
+                              case "MID": return "Đường giữa (MID)";
+                              case "BOT": return "Xạ thủ (BOT)";
+                              case "SUP": return "Hỗ trợ (SUP)";
+                              default: return val;
+                            }
+                          }}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-200">
                         <SelectItem value="ALL">Tất cả vị trí</SelectItem>
@@ -2212,7 +2744,12 @@ export default function GameDashboard({
                         <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider block">Chọn tuyển thủ để chỉnh sửa:</label>
                         <Select value={adminSelectedPlayerId} onValueChange={(val) => setAdminSelectedPlayerId(val || "")}>
                           <SelectTrigger className="bg-zinc-950 border-zinc-800 text-zinc-200 w-full text-xs">
-                            <SelectValue placeholder="Chọn tuyển thủ..." />
+                            <SelectValue placeholder="Chọn tuyển thủ...">
+                              {(val) => {
+                                const p = allPlayersInSaveGame.find(x => x.id === val);
+                                return p ? `${p.name} (${p.role} - Đội: ${p.teamName})` : val;
+                              }}
+                            </SelectValue>
                           </SelectTrigger>
                           <SelectContent className="bg-zinc-900 border-zinc-850 text-zinc-200 max-h-[300px]">
                             {allPlayersInSaveGame.map(p => (
@@ -2278,7 +2815,9 @@ export default function GameDashboard({
                             onValueChange={(val) => setAdminPlayerForm({ ...adminPlayerForm, role: val || "TOP" })}
                           >
                             <SelectTrigger className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs">
-                              <SelectValue placeholder="Chọn vai trò..." />
+                              <SelectValue placeholder="Chọn vai trò...">
+                                {(val) => val}
+                              </SelectValue>
                             </SelectTrigger>
                             <SelectContent className="bg-zinc-900 border-zinc-850 text-zinc-200">
                               <SelectItem value="TOP">TOP</SelectItem>
@@ -2320,7 +2859,13 @@ export default function GameDashboard({
                                 onValueChange={(val) => setAdminPlayerTeamId(val || "free")}
                               >
                                 <SelectTrigger className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs">
-                                  <SelectValue placeholder="Chọn đội..." />
+                                  <SelectValue placeholder="Chọn đội...">
+                                    {(val) => {
+                                      if (val === "free") return "Tự Do (Free Agent)";
+                                      const team = allTeamsInRegion.find(t => t.id === val);
+                                      return team ? `${team.name} (${team.region})` : val;
+                                    }}
+                                  </SelectValue>
                                 </SelectTrigger>
                                 <SelectContent className="bg-zinc-900 border-zinc-850 text-zinc-200">
                                   <SelectItem value="free">Tự Do (Free Agent)</SelectItem>
@@ -2462,7 +3007,12 @@ export default function GameDashboard({
                         <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider block">Chọn đội tuyển để chỉnh sửa:</label>
                         <Select value={adminSelectedTeamId} onValueChange={(val) => setAdminSelectedTeamId(val || "")}>
                           <SelectTrigger className="bg-zinc-950 border-zinc-800 text-zinc-200 w-full text-xs">
-                            <SelectValue placeholder="Chọn đội tuyển..." />
+                            <SelectValue placeholder="Chọn đội tuyển...">
+                              {(val) => {
+                                const t = allTeamsInRegion.find(x => x.id === val);
+                                return t ? `${t.name} (Giải: ${t.region})${t.isUser ? " - Đội của bạn" : ""}` : val;
+                              }}
+                            </SelectValue>
                           </SelectTrigger>
                           <SelectContent className="bg-zinc-900 border-zinc-850 text-zinc-200">
                             {allTeamsInRegion.map(t => (
@@ -2530,7 +3080,18 @@ export default function GameDashboard({
                                 onValueChange={(val) => setAdminTeamRegion(val || "LCK")}
                               >
                                 <SelectTrigger className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs">
-                                  <SelectValue placeholder="Chọn khu vực..." />
+                                  <SelectValue placeholder="Chọn khu vực...">
+                                    {(val) => {
+                                      switch (val) {
+                                        case "LCK": return "LCK (Hàn Quốc)";
+                                        case "LCP": return "LCP (Châu Á Thái Bình Dương)";
+                                        case "LPL": return "LPL (Trung Quốc)";
+                                        case "LEC": return "LEC (Châu Âu)";
+                                        case "CBLOL": return "CBLOL (Brazil)";
+                                        default: return val;
+                                      }
+                                    }}
+                                  </SelectValue>
                                 </SelectTrigger>
                                 <SelectContent className="bg-zinc-900 border-zinc-850 text-zinc-200">
                                   <SelectItem value="LCK">LCK (Hàn Quốc)</SelectItem>
@@ -2542,6 +3103,20 @@ export default function GameDashboard({
                               </Select>
                             </div>
                           </>
+                        )}
+
+                        {adminTeamMode === "edit" && (
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Tên đội tuyển</label>
+                            <Input
+                              type="text"
+                              value={adminTeamForm.name}
+                              onChange={(e) => setAdminTeamForm({ ...adminTeamForm, name: e.target.value })}
+                              className="bg-zinc-950 border-zinc-800 text-zinc-100 text-xs"
+                              placeholder="Tên đội tuyển..."
+                              maxLength={40}
+                            />
+                          </div>
                         )}
 
                         <div className="space-y-1.5">
@@ -2764,7 +3339,17 @@ export default function GameDashboard({
                           onValueChange={(val) => setAdminMailForm({ ...adminMailForm, category: val || "GENERAL" })}
                         >
                           <SelectTrigger className="bg-zinc-950 border-zinc-800 text-zinc-200 text-xs focus:ring-rose-500">
-                            <SelectValue placeholder="Chọn phân loại..." />
+                            <SelectValue placeholder="Chọn phân loại...">
+                              {(val) => {
+                                switch (val) {
+                                  case "GENERAL": return "GENERAL (Chung / Hệ thống)";
+                                  case "TRANSFER": return "TRANSFER (Chuyển nhượng)";
+                                  case "MATCH": return "MATCH (Trận đấu)";
+                                  case "BOARD": return "BOARD (Ban quản lý)";
+                                  default: return val;
+                                }
+                              }}
+                            </SelectValue>
                           </SelectTrigger>
                           <SelectContent className="bg-zinc-900 border-zinc-850 text-zinc-200">
                             <SelectItem value="GENERAL">GENERAL (Chung / Hệ thống)</SelectItem>
@@ -2814,19 +3399,74 @@ export default function GameDashboard({
           )}
           {/* DIALOG CHI TIẾT TUYỂN THỦ (GLOBAL) */}
           {selectedPlayer && (
-            <Dialog open={!!selectedPlayer} onOpenChange={(open) => !open && setSelectedPlayer(null)}>
+            <Dialog open={!!selectedPlayer} onOpenChange={(open) => { if (!open) { setSelectedPlayer(null); setIsEditingPlayerName(false); } }}>
               <DialogContent className="bg-zinc-900 border-zinc-800 text-zinc-100 max-w-lg shadow-2xl">
                 <DialogHeader className="border-b border-zinc-800 pb-4">
                   <div className="flex items-center gap-4">
                     <PlayerAvatar playerName={selectedPlayer.name} role={selectedPlayer.role} size={96} imageUrl={selectedPlayer.avatarUrl} />
                     <div className="flex flex-col gap-1">
-                      <div className="flex items-center gap-2">
-                        <Badge className="bg-blue-600 font-bold font-mono">{selectedPlayer.role}</Badge>
-                        <DialogTitle className="text-2xl font-black text-zinc-100 tracking-tight">{selectedPlayer.name}</DialogTitle>
-                      </div>
-                      <DialogDescription className="text-xs text-zinc-500 font-semibold mt-0.5">
-                        Tên thật: {selectedPlayer.realName || "Chưa cập nhật"} | Quốc tịch: {selectedPlayer.nationality}
-                      </DialogDescription>
+                      {isEditingPlayerName ? (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <Badge className="bg-blue-600 font-bold font-mono">{selectedPlayer.role}</Badge>
+                            <DialogTitle className="text-2xl font-black text-zinc-100 tracking-tight sr-only">Đổi tên tuyển thủ</DialogTitle>
+                            <Input
+                              type="text"
+                              value={editPlayerName}
+                              onChange={(e) => setEditPlayerName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleConfirmEditPlayerName();
+                                if (e.key === "Escape") handleCancelEditPlayerName();
+                              }}
+                              className="bg-zinc-950 border-zinc-700 text-zinc-100 text-lg font-black h-8 w-44 px-2 py-0"
+                              autoFocus
+                              maxLength={30}
+                              placeholder="Tên in-game..."
+                            />
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[10px] text-zinc-500 font-semibold">Tên thật:</span>
+                            <Input
+                              type="text"
+                              value={editPlayerRealName}
+                              onChange={(e) => setEditPlayerRealName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleConfirmEditPlayerName();
+                                if (e.key === "Escape") handleCancelEditPlayerName();
+                              }}
+                              className="bg-zinc-950 border-zinc-700 text-zinc-400 text-xs h-6 w-36 px-1.5 py-0"
+                              maxLength={40}
+                              placeholder="Tên thật..."
+                            />
+                            <button onClick={handleConfirmEditPlayerName} className="text-emerald-400 hover:text-emerald-300 transition-colors" title="Xác nhận">
+                              <Check className="w-4 h-4" />
+                            </button>
+                            <button onClick={handleCancelEditPlayerName} className="text-zinc-500 hover:text-zinc-300 transition-colors" title="Hủy">
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <DialogDescription className="sr-only">Đang chỉnh sửa tên tuyển thủ</DialogDescription>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <Badge className="bg-blue-600 font-bold font-mono">{selectedPlayer.role}</Badge>
+                            <DialogTitle className="text-2xl font-black text-zinc-100 tracking-tight">{selectedPlayer.name}</DialogTitle>
+                            {selectedPlayer.teamId === userTeam.id && (
+                              <button
+                                onClick={handleStartEditPlayerName}
+                                className="text-zinc-600 hover:text-blue-400 transition-colors"
+                                title="Đổi tên tuyển thủ"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                          <DialogDescription className="text-xs text-zinc-500 font-semibold mt-0.5">
+                            Tên thật: {selectedPlayer.realName || "Chưa cập nhật"} | Quốc tịch: {selectedPlayer.nationality}
+                          </DialogDescription>
+                        </>
+                      )}
                     </div>
                   </div>
                 </DialogHeader>

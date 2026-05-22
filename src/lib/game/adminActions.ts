@@ -18,6 +18,7 @@ export async function adminUpdatePlayerAction(playerId: string, data: {
   name?: string;
   role?: string;
   age?: number;
+  nationality?: string;
   laning?: number;
   teamfight?: number;
   macro?: number;
@@ -33,12 +34,13 @@ export async function adminUpdatePlayerAction(playerId: string, data: {
     const player = await db.player.findUnique({ where: { id: playerId } });
     if (!player) throw new Error("Không tìm thấy tuyển thủ");
 
-    await db.player.update({
-      where: { id: playerId },
+    await db.player.updateMany({
+      where: { name: player.name },
       data: {
         name: data.name !== undefined ? data.name : player.name,
         role: data.role !== undefined ? data.role : player.role,
         age: data.age !== undefined ? Number(data.age) : player.age,
+        nationality: data.nationality !== undefined ? data.nationality : player.nationality,
         laning: data.laning !== undefined ? Number(data.laning) : player.laning,
         teamfight: data.teamfight !== undefined ? Number(data.teamfight) : player.teamfight,
         macro: data.macro !== undefined ? Number(data.macro) : player.macro,
@@ -60,6 +62,7 @@ export async function adminUpdatePlayerAction(playerId: string, data: {
 
 // 2. Cập nhật ngân sách / quỹ lương của đội
 export async function adminUpdateTeamAction(teamId: string, data: {
+  name?: string;
   budget?: number;
   salaryCap?: number;
   points?: number;
@@ -74,9 +77,13 @@ export async function adminUpdateTeamAction(teamId: string, data: {
     const team = await db.team.findUnique({ where: { id: teamId } });
     if (!team) throw new Error("Không tìm thấy đội tuyển");
 
+    const oldName = team.name;
+    const newName = data.name !== undefined ? data.name.trim() : team.name;
+
     await db.team.update({
       where: { id: teamId },
       data: {
+        name: newName,
         budget: data.budget !== undefined ? Number(data.budget) : team.budget,
         salaryCap: data.salaryCap !== undefined ? Number(data.salaryCap) : team.salaryCap,
         points: data.points !== undefined ? Number(data.points) : team.points,
@@ -86,6 +93,27 @@ export async function adminUpdateTeamAction(teamId: string, data: {
         abbreviation: data.abbreviation !== undefined ? data.abbreviation : team.abbreviation,
       }
     });
+
+    if (data.logoUrl !== undefined || data.abbreviation !== undefined || data.name !== undefined) {
+      await db.team.updateMany({
+        where: { name: oldName },
+        data: {
+          name: newName,
+          logoUrl: data.logoUrl !== undefined ? data.logoUrl : team.logoUrl,
+          abbreviation: data.abbreviation !== undefined ? data.abbreviation : team.abbreviation,
+        }
+      });
+    }
+
+    if (data.budget !== undefined || data.salaryCap !== undefined) {
+      await db.team.updateMany({
+        where: { name: team.name, userId: null },
+        data: {
+          budget: data.budget !== undefined ? Number(data.budget) : team.budget,
+          salaryCap: data.salaryCap !== undefined ? Number(data.salaryCap) : team.salaryCap,
+        }
+      });
+    }
 
     revalidatePath("/");
     return { success: true };
@@ -154,18 +182,19 @@ export async function adminCreateTeamAction(data: {
   abbreviation?: string;
 }) {
   try {
-    const current = await checkAdmin();
+    await checkAdmin();
 
     const existing = await db.team.findFirst({
       where: {
         name: data.name,
-        userId: current.id,
+        userId: null,
       }
     });
     if (existing) {
-      throw new Error(`Đội tuyển với tên "${data.name}" đã tồn tại trong Save Game của bạn.`);
+      throw new Error(`Đội tuyển với tên "${data.name}" đã tồn tại trong hệ thống.`);
     }
 
+    // 1. Tạo bản mẫu (userId: null)
     await db.team.create({
       data: {
         name: data.name,
@@ -178,9 +207,29 @@ export async function adminCreateTeamAction(data: {
         wins: 0,
         losses: 0,
         points: 0,
-        userId: current.id,
+        userId: null,
       }
     });
+
+    // 2. Tạo cho toàn bộ user
+    const users = await db.user.findMany({ select: { id: true } });
+    for (const u of users) {
+      await db.team.create({
+        data: {
+          name: data.name,
+          region: data.region,
+          budget: Number(data.budget),
+          salaryCap: Number(data.salaryCap),
+          logoUrl: data.logoUrl || null,
+          abbreviation: data.abbreviation || null,
+          isUser: false,
+          wins: 0,
+          losses: 0,
+          points: 0,
+          userId: u.id,
+        }
+      });
+    }
 
     revalidatePath("/");
     return { success: true };
@@ -208,7 +257,26 @@ export async function adminCreatePlayerAction(data: {
   avatarUrl?: string;
 }) {
   try {
-    const current = await checkAdmin();
+    await checkAdmin();
+
+    let teamName: string | null = null;
+    if (data.teamId) {
+      const adminTeam = await db.team.findUnique({ where: { id: data.teamId } });
+      if (adminTeam) {
+        teamName = adminTeam.name;
+      }
+    }
+
+    // 1. Tạo tuyển thủ mẫu (userId = null)
+    let templateTeamId: string | null = null;
+    if (teamName) {
+      const templateTeam = await db.team.findFirst({
+        where: { name: teamName, userId: null }
+      });
+      if (templateTeam) {
+        templateTeamId = templateTeam.id;
+      }
+    }
 
     await db.player.create({
       data: {
@@ -225,10 +293,44 @@ export async function adminCreatePlayerAction(data: {
         championPool: Number(data.championPool),
         salary: Number(data.salary),
         value: Number(data.value),
-        teamId: data.teamId || null,
-        userId: current.id,
+        teamId: templateTeamId,
+        userId: null,
       }
     });
+
+    // 2. Tạo tuyển thủ cho tất cả user
+    const users = await db.user.findMany({ select: { id: true } });
+    for (const u of users) {
+      let userTeamId: string | null = null;
+      if (teamName) {
+        const userTeam = await db.team.findFirst({
+          where: { name: teamName, userId: u.id }
+        });
+        if (userTeam) {
+          userTeamId = userTeam.id;
+        }
+      }
+
+      await db.player.create({
+        data: {
+          name: data.name,
+          realName: data.realName || null,
+          avatarUrl: data.avatarUrl || null,
+          role: data.role,
+          age: Number(data.age),
+          nationality: data.nationality,
+          laning: Number(data.laning),
+          teamfight: Number(data.teamfight),
+          macro: Number(data.macro),
+          mentality: Number(data.mentality),
+          championPool: Number(data.championPool),
+          salary: Number(data.salary),
+          value: Number(data.value),
+          teamId: userTeamId,
+          userId: u.id,
+        }
+      });
+    }
 
     revalidatePath("/");
     return { success: true };

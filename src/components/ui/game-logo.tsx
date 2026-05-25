@@ -101,7 +101,7 @@ export const TeamLogo: React.FC<TeamLogoProps> = ({ teamName, size = 48, classNa
         <img
           src={imageUrl}
           alt={teamName}
-          className="w-full h-full object-cover"
+          className="w-full h-full object-contain p-1"
           onError={() => setImgError(true)}
         />
       </div>

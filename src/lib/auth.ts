@@ -40,7 +40,18 @@ export async function getCurrentUser() {
     const cookieStore = await cookies();
     const token = cookieStore.get("session")?.value;
     if (!token) return null;
-    return verifyToken(token);
+    const payload = verifyToken(token);
+    if (!payload) return null;
+
+    // Xác minh user thực sự còn tồn tại trong DB (tránh lỗi cache cookie khi xóa user)
+    const { db } = await import("@/lib/db");
+    const userExists = await db.user.findUnique({
+      where: { id: payload.id },
+      select: { id: true }
+    });
+    if (!userExists) return null;
+
+    return payload;
   } catch (err) {
     return null;
   }

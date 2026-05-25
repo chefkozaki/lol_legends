@@ -5,23 +5,24 @@ import { simulateLoLGame, TeamDraft } from "./engine";
 import { CHAMPIONS } from "./champions";
 import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/lib/auth";
+import { generateCupSchedule, transitionTournament, addDays } from "./tournament-manager";
 
-// Cộng ngày an toàn tránh lệch múi giờ
-function addDays(dateStr: string, days: number): string {
-  const parts = dateStr.split("-").map(Number);
-  const date = new Date(parts[0], parts[1] - 1, parts[2]);
-  date.setDate(date.getDate() + days);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
+// Helper addDays moved to tournament-manager.ts
 
 // Hàm khởi tạo Save Game độc lập cho một User bằng cách nhân bản dữ liệu mẫu (userId = null)
 async function initializeUserSaveGame(userId: string, templateTeamId: string) {
   // 1. Kiểm tra xem user đã có GameState chưa
   const existing = await db.gameState.findUnique({ where: { userId } });
-  if (existing) return existing;
+  if (existing && existing.userTeamId) return existing;
+
+  // Xóa rác nếu khởi tạo trước đó bị lỗi (để tránh UNIQUE constraint failed và loop StartGame)
+  if (existing) {
+    await db.gameState.delete({ where: { userId } });
+  }
+  await db.match.deleteMany({ where: { userId } });
+  await db.player.deleteMany({ where: { userId } });
+  await db.team.deleteMany({ where: { userId } });
+  await db.mail.deleteMany({ where: { userId } });
 
   // 2. Lấy tất cả các Team mẫu và Player mẫu
   const templateTeams = await db.team.findMany({
@@ -118,15 +119,15 @@ async function initializeUserSaveGame(userId: string, templateTeamId: string) {
     });
   }
 
-  // 5. Thay vì nhân bản Match mẫu tĩnh, tạo lịch thi đấu động cho giải FIRST_STAND_QF!
-  await generateFirstStandQF(userId, "2026");
+  // 5. Khởi tạo giải đấu đầu tiên: CUP
+  await generateCupSchedule(userId, "2026-01-05");
 
   // 6. Tạo GameState
   const newGameState = await db.gameState.create({
     data: {
       currentDate: "2026-01-05",
       userTeamId: teamIdMap[templateTeamId],
-      seasonState: "FIRST_STAND_QF",
+      seasonState: "CUP",
       week: 1,
       dayOfSeason: 1,
       userId: userId
@@ -149,874 +150,6 @@ export async function selectTeamAction(templateTeamId: string) {
     console.error("Lỗi chọn đội tuyển:", error);
     return { success: false, error: error.message };
   }
-}
-
-// --- HELPER FUNCTIONS FOR TOURNAMENT GENERATION ---
-
-function shuffleArray<T>(array: T[]): T[] {
-  const arr = [...array];
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
-function generateRoundRobin(teamIds: string[]): { home: { id: string }, away: { id: string } }[][] {
-  const n = teamIds.length;
-  const rounds: { home: { id: string }, away: { id: string } }[][] = [];
-  const list = [...teamIds];
-
-  for (let r = 0; r < n - 1; r++) {
-    const roundMatches: { home: { id: string }, away: { id: string } }[] = [];
-    for (let i = 0; i < n / 2; i++) {
-      const homeIdx = (r + i) % (n - 1);
-      let awayIdx = (r + n - 1 - i) % (n - 1);
-      if (i === 0) {
-        awayIdx = n - 1;
-      }
-      
-      const homeId = list[homeIdx];
-      const awayId = list[awayIdx];
-
-      if (Math.random() > 0.5) {
-        roundMatches.push({ home: { id: homeId }, away: { id: awayId } });
-      } else {
-        roundMatches.push({ home: { id: awayId }, away: { id: homeId } });
-      }
-    }
-    rounds.push(roundMatches);
-  }
-  return rounds;
-}
-
-function generateOddRoundRobin(teamIds: string[]): { home: { id: string }, away: { id: string } }[][] {
-  const list = [...teamIds, "BYE"];
-  const n = list.length;
-  const rounds: { home: { id: string }, away: { id: string } }[][] = [];
-
-  for (let r = 0; r < n - 1; r++) {
-    const roundMatches: { home: { id: string }, away: { id: string } }[] = [];
-    for (let i = 0; i < n / 2; i++) {
-      const homeIdx = (r + i) % (n - 1);
-      let awayIdx = (r + n - 1 - i) % (n - 1);
-      if (i === 0) {
-        awayIdx = n - 1;
-      }
-      
-      const homeId = list[homeIdx];
-      const awayId = list[awayIdx];
-
-      if (homeId !== "BYE" && awayId !== "BYE") {
-        if (Math.random() > 0.5) {
-          roundMatches.push({ home: { id: homeId }, away: { id: awayId } });
-        } else {
-          roundMatches.push({ home: { id: awayId }, away: { id: homeId } });
-        }
-      }
-    }
-    rounds.push(roundMatches);
-  }
-  return rounds;
-}
-
-async function getRegionalRankings(userId: string, year: string): Promise<Record<string, string[]>> {
-  const regions = ["LCK", "LCP", "LPL", "LEC", "CBLOL"];
-  const rankings: Record<string, string[]> = {};
-
-  for (const region of regions) {
-    const teams = await db.team.findMany({
-      where: { region, userId }
-    });
-
-    const finalsMatch = await db.match.findFirst({
-      where: {
-        userId,
-        tournament: "REGIONAL",
-        date: `${year}-04-04`,
-        homeTeam: { region }
-      }
-    });
-
-    let rank1Id = "";
-    let rank2Id = "";
-    let rank3Id = "";
-    let rank4Id = "";
-
-    if (finalsMatch && finalsMatch.played) {
-      if (finalsMatch.homeScore > finalsMatch.awayScore) {
-        rank1Id = finalsMatch.homeTeamId;
-        rank2Id = finalsMatch.awayTeamId;
-      } else {
-        rank1Id = finalsMatch.awayTeamId;
-        rank2Id = finalsMatch.homeTeamId;
-      }
-    }
-
-    const sfMatches = await db.match.findMany({
-      where: {
-        userId,
-        tournament: "REGIONAL",
-        date: `${year}-03-28`,
-        homeTeam: { region }
-      }
-    });
-
-    const sfLosers: string[] = [];
-    for (const match of sfMatches) {
-      if (match.played) {
-        if (match.homeScore > match.awayScore) {
-          sfLosers.push(match.awayTeamId);
-        } else {
-          sfLosers.push(match.homeTeamId);
-        }
-      }
-    }
-
-    const sfLoserTeams = await db.team.findMany({
-      where: { id: { in: sfLosers } },
-      orderBy: [
-        { wins: "desc" },
-        { points: "desc" }
-      ]
-    });
-
-    if (sfLoserTeams.length >= 1) rank3Id = sfLoserTeams[0].id;
-    if (sfLoserTeams.length >= 2) rank4Id = sfLoserTeams[1].id;
-
-    const excludedIds = [rank1Id, rank2Id, rank3Id, rank4Id].filter(Boolean);
-    const otherTeams = await db.team.findMany({
-      where: {
-        region,
-        userId,
-        id: { notIn: excludedIds }
-      },
-      orderBy: [
-        { wins: "desc" },
-        { points: "desc" }
-      ]
-    });
-
-    const sortedIds = [
-      rank1Id,
-      rank2Id,
-      rank3Id,
-      rank4Id,
-      ...otherTeams.map(t => t.id)
-    ].filter(Boolean);
-
-    if (sortedIds.length < teams.length) {
-      const allSorted = await db.team.findMany({
-        where: { region, userId },
-        orderBy: [
-          { wins: "desc" },
-          { points: "desc" }
-        ]
-      });
-      rankings[region] = allSorted.map(t => t.id);
-    } else {
-      rankings[region] = sortedIds;
-    }
-  }
-
-  return rankings;
-}
-
-async function resetTeamStats(userId: string) {
-  await db.team.updateMany({
-    where: { userId },
-    data: { wins: 0, losses: 0, points: 0 }
-  });
-}
-
-async function generateFirstStandQF(userId: string, year: string) {
-  const REGIONS = ["LCK", "LCP", "LPL", "LEC", "CBLOL"];
-  for (const region of REGIONS) {
-    const teams = await db.team.findMany({
-      where: { region, userId }
-    });
-    const shuffled = shuffleArray(teams);
-    const date = `${year}-01-10`;
-    for (let i = 0; i < 4; i++) {
-      await db.match.create({
-        data: {
-          tournament: "FIRST_STAND",
-          homeTeamId: shuffled[i * 2].id,
-          awayTeamId: shuffled[i * 2 + 1].id,
-          date,
-          played: false,
-          homeScore: 0,
-          awayScore: 0,
-          userId
-        }
-      });
-    }
-  }
-}
-
-async function generateFirstStandSF(userId: string, year: string) {
-  const REGIONS = ["LCK", "LCP", "LPL", "LEC", "CBLOL"];
-  for (const region of REGIONS) {
-    const qfMatches = await db.match.findMany({
-      where: {
-        userId,
-        tournament: "FIRST_STAND",
-        date: `${year}-01-10`,
-        homeTeam: { region }
-      }
-    });
-
-    const winners: string[] = [];
-    for (const m of qfMatches) {
-      if (m.homeScore > m.awayScore) {
-        winners.push(m.homeTeamId);
-      } else {
-        winners.push(m.awayTeamId);
-      }
-    }
-
-    if (winners.length >= 4) {
-      const date = `${year}-01-17`;
-      await db.match.create({
-        data: {
-          tournament: "FIRST_STAND",
-          homeTeamId: winners[0],
-          awayTeamId: winners[1],
-          date,
-          played: false,
-          userId
-        }
-      });
-      await db.match.create({
-        data: {
-          tournament: "FIRST_STAND",
-          homeTeamId: winners[2],
-          awayTeamId: winners[3],
-          date,
-          played: false,
-          userId
-        }
-      });
-    }
-  }
-}
-
-async function generateFirstStandF(userId: string, year: string) {
-  const REGIONS = ["LCK", "LCP", "LPL", "LEC", "CBLOL"];
-  for (const region of REGIONS) {
-    const sfMatches = await db.match.findMany({
-      where: {
-        userId,
-        tournament: "FIRST_STAND",
-        date: `${year}-01-17`,
-        homeTeam: { region }
-      }
-    });
-
-    const winners: string[] = [];
-    for (const m of sfMatches) {
-      if (m.homeScore > m.awayScore) {
-        winners.push(m.homeTeamId);
-      } else {
-        winners.push(m.awayTeamId);
-      }
-    }
-
-    if (winners.length >= 2) {
-      await db.match.create({
-        data: {
-          tournament: "FIRST_STAND",
-          homeTeamId: winners[0],
-          awayTeamId: winners[1],
-          date: `${year}-01-24`,
-          played: false,
-          userId
-        }
-      });
-    }
-  }
-}
-
-async function generateRegionalRegularSchedule(userId: string, year: string) {
-  const REGIONS = ["LCK", "LCP", "LPL", "LEC", "CBLOL"];
-  const REGIONAL_DATES = ["02-07", "02-14", "02-21", "02-28", "03-07", "03-14", "03-21"];
-
-  for (const region of REGIONS) {
-    const teams = await db.team.findMany({
-      where: { region, userId }
-    });
-    const shuffled = shuffleArray(teams);
-    const teamIds = shuffled.map(t => t.id);
-    const rounds = generateRoundRobin(teamIds);
-
-    for (let r = 0; r < 7; r++) {
-      const roundDate = `${year}-${REGIONAL_DATES[r]}`;
-      for (const match of rounds[r]) {
-        await db.match.create({
-          data: {
-            tournament: "REGIONAL",
-            homeTeamId: match.home.id,
-            awayTeamId: match.away.id,
-            date: roundDate,
-            played: false,
-            userId
-          }
-        });
-      }
-    }
-  }
-}
-
-async function generateRegionalPlayoffsSF(userId: string, year: string) {
-  const REGIONS = ["LCK", "LCP", "LPL", "LEC", "CBLOL"];
-  for (const region of REGIONS) {
-    const teams = await db.team.findMany({
-      where: { region, userId },
-      orderBy: [
-        { wins: "desc" },
-        { points: "desc" }
-      ]
-    });
-
-    if (teams.length >= 4) {
-      const date = `${year}-03-28`;
-      await db.match.create({
-        data: {
-          tournament: "REGIONAL",
-          homeTeamId: teams[0].id,
-          awayTeamId: teams[3].id,
-          date,
-          played: false,
-          userId
-        }
-      });
-      await db.match.create({
-        data: {
-          tournament: "REGIONAL",
-          homeTeamId: teams[1].id,
-          awayTeamId: teams[2].id,
-          date,
-          played: false,
-          userId
-        }
-      });
-    }
-  }
-}
-
-async function generateRegionalPlayoffsF(userId: string, year: string) {
-  const REGIONS = ["LCK", "LCP", "LPL", "LEC", "CBLOL"];
-  for (const region of REGIONS) {
-    const sfMatches = await db.match.findMany({
-      where: {
-        userId,
-        tournament: "REGIONAL",
-        date: `${year}-03-28`,
-        homeTeam: { region }
-      }
-    });
-
-    const winners: string[] = [];
-    for (const m of sfMatches) {
-      if (m.homeScore > m.awayScore) {
-        winners.push(m.homeTeamId);
-      } else {
-        winners.push(m.awayTeamId);
-      }
-    }
-
-    if (winners.length >= 2) {
-      await db.match.create({
-        data: {
-          tournament: "REGIONAL",
-          homeTeamId: winners[0],
-          awayTeamId: winners[1],
-          date: `${year}-04-04`,
-          played: false,
-          userId
-        }
-      });
-    }
-  }
-}
-
-async function generateMSIGroupsSchedule(userId: string, year: string) {
-  const rankings = await getRegionalRankings(userId, year);
-
-  const groupATeams = [
-    rankings["LCK"][0],
-    rankings["LPL"][1],
-    rankings["LEC"][0],
-    rankings["LCP"][1],
-    rankings["CBLOL"][0]
-  ].filter(Boolean);
-
-  const groupBTeams = [
-    rankings["LPL"][0],
-    rankings["LCK"][1],
-    rankings["LEC"][1],
-    rankings["LCP"][0],
-    rankings["CBLOL"][1]
-  ].filter(Boolean);
-
-  const groupARounds = generateOddRoundRobin(groupATeams);
-  const groupBRounds = generateOddRoundRobin(groupBTeams);
-
-  const MSI_DATES = ["05-02", "05-09", "05-16", "05-23", "05-30"];
-
-  for (let r = 0; r < 5; r++) {
-    const roundDate = `${year}-${MSI_DATES[r]}`;
-    for (const match of groupARounds[r]) {
-      await db.match.create({
-        data: {
-          tournament: "MSI",
-          homeTeamId: match.home.id,
-          awayTeamId: match.away.id,
-          date: roundDate,
-          played: false,
-          userId
-        }
-      });
-    }
-    for (const match of groupBRounds[r]) {
-      await db.match.create({
-        data: {
-          tournament: "MSI",
-          homeTeamId: match.home.id,
-          awayTeamId: match.away.id,
-          date: roundDate,
-          played: false,
-          userId
-        }
-      });
-    }
-  }
-}
-
-async function generateMSIPlayoffsSF(userId: string, year: string) {
-  const rankings = await getRegionalRankings(userId, year);
-
-  const groupATeamsIds = [
-    rankings["LCK"][0],
-    rankings["LPL"][1],
-    rankings["LEC"][0],
-    rankings["LCP"][1],
-    rankings["CBLOL"][0]
-  ].filter(Boolean);
-
-  const groupBTeamsIds = [
-    rankings["LPL"][0],
-    rankings["LCK"][1],
-    rankings["LEC"][1],
-    rankings["LCP"][0],
-    rankings["CBLOL"][1]
-  ].filter(Boolean);
-
-  const groupATeams = await db.team.findMany({
-    where: { id: { in: groupATeamsIds } },
-    orderBy: [
-      { wins: "desc" },
-      { points: "desc" }
-    ]
-  });
-
-  const groupBTeams = await db.team.findMany({
-    where: { id: { in: groupBTeamsIds } },
-    orderBy: [
-      { wins: "desc" },
-      { points: "desc" }
-    ]
-  });
-
-  if (groupATeams.length >= 2 && groupBTeams.length >= 2) {
-    const date = `${year}-06-06`;
-    await db.match.create({
-      data: {
-        tournament: "MSI",
-        homeTeamId: groupATeams[0].id,
-        awayTeamId: groupBTeams[1].id,
-        date,
-        played: false,
-        userId
-      }
-    });
-    await db.match.create({
-      data: {
-        tournament: "MSI",
-        homeTeamId: groupBTeams[0].id,
-        awayTeamId: groupATeams[1].id,
-        date,
-        played: false,
-        userId
-      }
-    });
-  }
-}
-
-async function generateMSIPlayoffsF(userId: string, year: string) {
-  const sfMatches = await db.match.findMany({
-    where: {
-      userId,
-      tournament: "MSI",
-      date: `${year}-06-06`
-    }
-  });
-
-  const winners: string[] = [];
-  for (const m of sfMatches) {
-    if (m.homeScore > m.awayScore) {
-      winners.push(m.homeTeamId);
-    } else {
-      winners.push(m.awayTeamId);
-    }
-  }
-
-  if (winners.length >= 2) {
-    await db.match.create({
-      data: {
-        tournament: "MSI",
-        homeTeamId: winners[0],
-        awayTeamId: winners[1],
-        date: `${year}-06-13`,
-        played: false,
-        userId
-      }
-    });
-  }
-}
-
-async function generateEWCSchedule(userId: string, year: string) {
-  const rankings = await getRegionalRankings(userId, year);
-
-  const ewcTeams = [
-    rankings["LCK"][0], rankings["LCK"][1],
-    rankings["LPL"][0], rankings["LPL"][1],
-    rankings["LEC"][0], rankings["LEC"][1],
-    rankings["LCP"][0],
-    rankings["CBLOL"][0]
-  ].filter(Boolean);
-
-  if (ewcTeams.length >= 8) {
-    const date = `${year}-07-04`;
-    await db.match.create({ data: { tournament: "EWC", homeTeamId: ewcTeams[0], awayTeamId: ewcTeams[5], date, played: false, userId } });
-    await db.match.create({ data: { tournament: "EWC", homeTeamId: ewcTeams[2], awayTeamId: ewcTeams[6], date, played: false, userId } });
-    await db.match.create({ data: { tournament: "EWC", homeTeamId: ewcTeams[4], awayTeamId: ewcTeams[3], date, played: false, userId } });
-    await db.match.create({ data: { tournament: "EWC", homeTeamId: ewcTeams[7], awayTeamId: ewcTeams[1], date, played: false, userId } });
-  }
-}
-
-async function generateEWCSF(userId: string, year: string) {
-  const qfMatches = await db.match.findMany({
-    where: {
-      userId,
-      tournament: "EWC",
-      date: `${year}-07-04`
-    }
-  });
-
-  const winners: string[] = [];
-  for (const m of qfMatches) {
-    if (m.homeScore > m.awayScore) {
-      winners.push(m.homeTeamId);
-    } else {
-      winners.push(m.awayTeamId);
-    }
-  }
-
-  if (winners.length >= 4) {
-    const date = `${year}-07-11`;
-    await db.match.create({ data: { tournament: "EWC", homeTeamId: winners[0], awayTeamId: winners[1], date, played: false, userId } });
-    await db.match.create({ data: { tournament: "EWC", homeTeamId: winners[2], awayTeamId: winners[3], date, played: false, userId } });
-  }
-}
-
-async function generateEWCF(userId: string, year: string) {
-  const sfMatches = await db.match.findMany({
-    where: {
-      userId,
-      tournament: "EWC",
-      date: `${year}-07-11`
-    }
-  });
-
-  const winners: string[] = [];
-  for (const m of sfMatches) {
-    if (m.homeScore > m.awayScore) {
-      winners.push(m.homeTeamId);
-    } else {
-      winners.push(m.awayTeamId);
-    }
-  }
-
-  if (winners.length >= 2) {
-    await db.match.create({
-      data: {
-        tournament: "EWC",
-        homeTeamId: winners[0],
-        awayTeamId: winners[1],
-        date: `${year}-07-18`,
-        played: false,
-        userId
-      }
-    });
-  }
-}
-
-async function generateWorldsGroupsSchedule(userId: string, year: string) {
-  const rankings = await getRegionalRankings(userId, year);
-
-  const groupATeams = [rankings["LCK"][0], rankings["LPL"][2], rankings["LEC"][1], rankings["LCP"][2]].filter(Boolean);
-  const groupBTeams = [rankings["LPL"][0], rankings["LCK"][2], rankings["LCP"][1], rankings["CBLOL"][1]].filter(Boolean);
-  const groupCTeams = [rankings["LEC"][0], rankings["LPL"][1], rankings["LCK"][3], rankings["CBLOL"][0]].filter(Boolean);
-  const groupDTeams = [rankings["LCP"][0], rankings["LEC"][2], rankings["LPL"][3], rankings["LCK"][1]].filter(Boolean);
-
-  const groupARounds = generateRoundRobin(groupATeams);
-  const groupBRounds = generateRoundRobin(groupBTeams);
-  const groupCRounds = generateRoundRobin(groupCTeams);
-  const groupDRounds = generateRoundRobin(groupDTeams);
-
-  const WORLDS_DATES = ["10-03", "10-10", "10-17"];
-
-  for (let r = 0; r < 3; r++) {
-    const roundDate = `${year}-${WORLDS_DATES[r]}`;
-    const allRoundMatches = [
-      ...groupARounds[r],
-      ...groupBRounds[r],
-      ...groupCRounds[r],
-      ...groupDRounds[r]
-    ];
-    for (const match of allRoundMatches) {
-      await db.match.create({
-        data: {
-          tournament: "WORLDS",
-          homeTeamId: match.home.id,
-          awayTeamId: match.away.id,
-          date: roundDate,
-          played: false,
-          userId
-        }
-      });
-    }
-  }
-}
-
-async function generateWorldsPlayoffsQF(userId: string, year: string) {
-  const rankings = await getRegionalRankings(userId, year);
-
-  const groupATeamsIds = [rankings["LCK"][0], rankings["LPL"][2], rankings["LEC"][1], rankings["LCP"][2]].filter(Boolean);
-  const groupBTeamsIds = [rankings["LPL"][0], rankings["LCK"][2], rankings["LCP"][1], rankings["CBLOL"][1]].filter(Boolean);
-  const groupCTeamsIds = [rankings["LEC"][0], rankings["LPL"][1], rankings["LCK"][3], rankings["CBLOL"][0]].filter(Boolean);
-  const groupDTeamsIds = [rankings["LCP"][0], rankings["LEC"][2], rankings["LPL"][3], rankings["LCK"][1]].filter(Boolean);
-
-  const groupATeams = await db.team.findMany({ where: { id: { in: groupATeamsIds } }, orderBy: [{ wins: "desc" }, { points: "desc" }] });
-  const groupBTeams = await db.team.findMany({ where: { id: { in: groupBTeamsIds } }, orderBy: [{ wins: "desc" }, { points: "desc" }] });
-  const groupCTeams = await db.team.findMany({ where: { id: { in: groupCTeamsIds } }, orderBy: [{ wins: "desc" }, { points: "desc" }] });
-  const groupDTeams = await db.team.findMany({ where: { id: { in: groupDTeamsIds } }, orderBy: [{ wins: "desc" }, { points: "desc" }] });
-
-  if (groupATeams.length >= 2 && groupBTeams.length >= 2 && groupCTeams.length >= 2 && groupDTeams.length >= 2) {
-    const date = `${year}-10-24`;
-    await db.match.create({ data: { tournament: "WORLDS", homeTeamId: groupATeams[0].id, awayTeamId: groupBTeams[1].id, date, played: false, userId } });
-    await db.match.create({ data: { tournament: "WORLDS", homeTeamId: groupBTeams[0].id, awayTeamId: groupATeams[1].id, date, played: false, userId } });
-    await db.match.create({ data: { tournament: "WORLDS", homeTeamId: groupCTeams[0].id, awayTeamId: groupDTeams[1].id, date, played: false, userId } });
-    await db.match.create({ data: { tournament: "WORLDS", homeTeamId: groupDTeams[0].id, awayTeamId: groupCTeams[1].id, date, played: false, userId } });
-  }
-}
-
-async function generateWorldsPlayoffsSF(userId: string, year: string) {
-  const qfMatches = await db.match.findMany({
-    where: {
-      userId,
-      tournament: "WORLDS",
-      date: `${year}-10-24`
-    }
-  });
-
-  const winners: string[] = [];
-  for (const m of qfMatches) {
-    if (m.homeScore > m.awayScore) {
-      winners.push(m.homeTeamId);
-    } else {
-      winners.push(m.awayTeamId);
-    }
-  }
-
-  if (winners.length >= 4) {
-    const date = `${year}-10-31`;
-    await db.match.create({ data: { tournament: "WORLDS", homeTeamId: winners[0], awayTeamId: winners[1], date, played: false, userId } });
-    await db.match.create({ data: { tournament: "WORLDS", homeTeamId: winners[2], awayTeamId: winners[3], date, played: false, userId } });
-  }
-}
-
-async function generateWorldsPlayoffsF(userId: string, year: string) {
-  const sfMatches = await db.match.findMany({
-    where: {
-      userId,
-      tournament: "WORLDS",
-      date: `${year}-10-31`
-    }
-  });
-
-  const winners: string[] = [];
-  for (const m of sfMatches) {
-    if (m.homeScore > m.awayScore) {
-      winners.push(m.homeTeamId);
-    } else {
-      winners.push(m.awayTeamId);
-    }
-  }
-
-  if (winners.length >= 2) {
-    await db.match.create({
-      data: {
-        tournament: "WORLDS",
-        homeTeamId: winners[0],
-        awayTeamId: winners[1],
-        date: `${year}-11-07`,
-        played: false,
-        userId
-      }
-    });
-  }
-}
-
-async function transitionTournament(userId: string, userTeamId: string, currentDate: string, currentSeasonState: string): Promise<string> {
-  const year = currentDate.split("-")[0];
-  let nextSeasonState = currentSeasonState;
-
-  if (currentSeasonState === "FIRST_STAND_QF") {
-    await generateFirstStandSF(userId, year);
-    nextSeasonState = "FIRST_STAND_SF";
-  } else if (currentSeasonState === "FIRST_STAND_SF") {
-    await generateFirstStandF(userId, year);
-    nextSeasonState = "FIRST_STAND_F";
-  } else if (currentSeasonState === "FIRST_STAND_F") {
-    await resetTeamStats(userId);
-    await generateRegionalRegularSchedule(userId, year);
-    nextSeasonState = "REGIONAL_REGULAR";
-
-    await db.mail.create({
-      data: {
-        title: "Khởi tranh Mùa Giải Khu Vực!",
-        content: `Kính gửi HLV,
-
-Mùa giải khu vực đã chính thức bắt đầu. 8 đội tuyển trong khu vực sẽ thi đấu vòng tròn 1 lượt (7 trận) để tìm ra 4 đội xuất sắc nhất lọt vào vòng Playoff.
-
-Hãy cố gắng đạt thứ hạng cao để giành vé tham dự các giải đấu quốc tế lớn tiếp theo!`,
-        date: currentDate,
-        sender: "Ban Tổ Chức Giải Đấu",
-        category: "GENERAL",
-        userId
-      }
-    });
-  } else if (currentSeasonState === "REGIONAL_REGULAR") {
-    await generateRegionalPlayoffsSF(userId, year);
-    nextSeasonState = "REGIONAL_PLAYOFF_SF";
-  } else if (currentSeasonState === "REGIONAL_PLAYOFF_SF") {
-    await generateRegionalPlayoffsF(userId, year);
-    nextSeasonState = "REGIONAL_PLAYOFF_F";
-  } else if (currentSeasonState === "REGIONAL_PLAYOFF_F") {
-    await resetTeamStats(userId);
-    await generateMSIGroupsSchedule(userId, year);
-    nextSeasonState = "MSI_GROUPS";
-
-    await db.mail.create({
-      data: {
-        title: "Mid-Season Invitational (MSI) chính thức khởi tranh!",
-        content: `Chào HLV,
-
-Giải đấu MSI năm nay quy tụ 10 đội tuyển mạnh nhất từ các khu vực.
-Các đội tuyển được chia làm 2 bảng thi đấu vòng tròn tính điểm. 2 đội đứng đầu mỗi bảng sẽ lọt vào Bán kết.
-
-Chúc đội tuyển thi đấu thành công!`,
-        date: currentDate,
-        sender: "Ban Tổ Chức MSI",
-        category: "GENERAL",
-        userId
-      }
-    });
-  } else if (currentSeasonState === "MSI_GROUPS") {
-    await generateMSIPlayoffsSF(userId, year);
-    nextSeasonState = "MSI_PLAYOFF_SF";
-  } else if (currentSeasonState === "MSI_PLAYOFF_SF") {
-    await generateMSIPlayoffsF(userId, year);
-    nextSeasonState = "MSI_PLAYOFF_F";
-  } else if (currentSeasonState === "MSI_PLAYOFF_F") {
-    await resetTeamStats(userId);
-    await generateEWCSchedule(userId, year);
-    nextSeasonState = "EWC_QF";
-
-    await db.mail.create({
-      data: {
-        title: "Esports World Cup (EWC) chính thức bắt đầu!",
-        content: `Chào HLV,
-
-Giải đấu EWC đã khởi tranh với sự góp mặt của 8 đội tuyển hàng đầu thế giới. Thể thức loại trực tiếp vô cùng khốc liệt, sảy chân một bước là phải ra về!`,
-        date: currentDate,
-        sender: "Ban Tổ Chức EWC",
-        category: "GENERAL",
-        userId
-      }
-    });
-  } else if (currentSeasonState === "EWC_QF") {
-    await generateEWCSF(userId, year);
-    nextSeasonState = "EWC_SF";
-  } else if (currentSeasonState === "EWC_SF") {
-    await generateEWCF(userId, year);
-    nextSeasonState = "EWC_F";
-  } else if (currentSeasonState === "EWC_F") {
-    await resetTeamStats(userId);
-    await generateWorldsGroupsSchedule(userId, year);
-    nextSeasonState = "WORLDS_GROUPS";
-
-    await db.mail.create({
-      data: {
-        title: "Chung Kết Thế Giới (Worlds) chính thức khai mạc!",
-        content: `Kính gửi HLV,
-
-Giải đấu lớn nhất trong năm - Chung Kết Thế Giới đã bắt đầu! 16 đội tuyển xuất sắc nhất sẽ cạnh tranh cho chiếc cúp vô địch danh giá.
-
-Chúc đội tuyển có những trận đấu cống hiến và chạm tay vào đỉnh vinh quang!`,
-        date: currentDate,
-        sender: "Ban Tổ Chức Worlds",
-        category: "GENERAL",
-        userId
-      }
-    });
-  } else if (currentSeasonState === "WORLDS_GROUPS") {
-    await generateWorldsPlayoffsQF(userId, year);
-    nextSeasonState = "WORLDS_PLAYOFF_QF";
-  } else if (currentSeasonState === "WORLDS_PLAYOFF_QF") {
-    await generateWorldsPlayoffsSF(userId, year);
-    nextSeasonState = "WORLDS_PLAYOFF_SF";
-  } else if (currentSeasonState === "WORLDS_PLAYOFF_SF") {
-    await generateWorldsPlayoffsF(userId, year);
-    nextSeasonState = "WORLDS_PLAYOFF_F";
-  } else if (currentSeasonState === "WORLDS_PLAYOFF_F") {
-    nextSeasonState = "OFF_SEASON";
-
-    await db.mail.create({
-      data: {
-        title: "Bắt đầu Mùa Chuyển Nhượng (Off-season)!",
-        content: `Kính gửi HLV,
-
-Mùa giải thi đấu chuyên nghiệp của năm nay đã khép lại. 
-Đây là khoảng thời gian để bạn tái cấu trúc đội hình, đàm phán hợp đồng, ký kết với các tuyển thủ tự do hoặc sa thải các tuyển thủ không còn nằm trong kế hoạch.
-
-Bấm "Tiếp Tục (Advance)" sẽ tiến nhanh qua từng tuần để đi tới mùa giải tiếp theo!`,
-        date: currentDate,
-        sender: "Ban Lãnh Đạo CLB",
-        category: "TRANSFER",
-        userId
-      }
-    });
-  }
-
-  await db.gameState.update({
-    where: { userId },
-    data: { seasonState: nextSeasonState }
-  });
-
-  return nextSeasonState;
 }
 
 async function simulateOtherMatches(date: string, userTeamId: string, userId: string) {
@@ -1141,13 +274,13 @@ export async function advanceDayAction() {
           const startNewYearDate = `${startYear}-01-05`;
 
           await resetTeamStats(userId);
-          await generateFirstStandQF(userId, startYear);
+          await generateCupSchedule(userId, `${startYear}-01-05`);
 
           await db.gameState.update({
             where: { id: gameState.id },
             data: {
               currentDate: startNewYearDate,
-              seasonState: "FIRST_STAND_QF",
+              seasonState: "CUP",
               dayOfSeason: 1,
               week: 1
             }
@@ -1238,24 +371,34 @@ Giải đấu Tiền Mùa Giải First Stand Kickoff đã chính thức quay tr�
 
       // Kiểm tra xem tất cả trận đấu của giai đoạn hiện tại đã hoàn thành chưa
       let currentTournament = "";
-      if (tempSeasonState.startsWith("FIRST_STAND")) currentTournament = "FIRST_STAND";
-      else if (tempSeasonState.startsWith("REGIONAL")) currentTournament = "REGIONAL";
-      else if (tempSeasonState.startsWith("MSI")) currentTournament = "MSI";
+      if (tempSeasonState.includes("CUP")) currentTournament = "CUP"; // Sẽ query theo regex nếu cần
+      else if (tempSeasonState.startsWith("FST")) currentTournament = "FST";
+      else if (tempSeasonState.startsWith("DOMESTIC_1")) currentTournament = "DOMESTIC_1"; // Pseudo name
+      else if (tempSeasonState.startsWith("ROAD_TO_EWC")) currentTournament = "ROAD_TO_EWC";
       else if (tempSeasonState.startsWith("EWC")) currentTournament = "EWC";
+      else if (tempSeasonState.startsWith("ROAD_TO_MSI")) currentTournament = "ROAD_TO_MSI";
+      else if (tempSeasonState.startsWith("MSI")) currentTournament = "MSI";
+      else if (tempSeasonState.startsWith("DOMESTIC_2")) currentTournament = "DOMESTIC_2";
       else if (tempSeasonState.startsWith("WORLDS")) currentTournament = "WORLDS";
 
-      const unplayedMatchesInStage = await db.match.findFirst({
-        where: {
-          userId,
-          tournament: currentTournament,
-          played: false
-        }
+      // Kiểm tra các trận đấu có liên quan đến trạng thái hiện tại
+      // Vì tournament string thực tế có thể là LCK_CUP, LPL_SPLIT_1, ROAD_TO_EWC_LCK...
+      // Ta sẽ lọc những trận đấu diễn ra trước nextDate hoặc check tất cả các trận chưa đá của stage đó.
+      // Giải pháp an toàn hơn: Kiểm tra xem CÒN BẤT KỲ TRẬN NÀO chưa đá trước nextDate không.
+      const unplayedMatchBeforeNextDate = await db.match.findFirst({
+        where: { userId, played: false, date: { lt: nextDate } }
       });
 
-      if (!unplayedMatchesInStage && currentTournament !== "") {
-        const newSeasonState = await transitionTournament(userId, userTeamId, tempDate, tempSeasonState);
-        tempSeasonState = newSeasonState;
-        break;
+      if (!unplayedMatchBeforeNextDate) {
+        // Có thể cần transition
+        // Tuy nhiên, để chính xác, transitionTournament chỉ diễn ra khi MỘT GIAI ĐOẠN ĐÃ XONG.
+        // Giai đoạn xong = Không còn trận đấu `played: false` nào trong DB! (Vì mỗi stage gen ra toàn bộ lịch của nó).
+        const anyUnplayedMatches = await db.match.findFirst({ where: { userId, played: false } });
+        if (!anyUnplayedMatches) {
+          const newSeasonState = await transitionTournament(userId, tempDate, tempSeasonState);
+          tempSeasonState = newSeasonState;
+          break;
+        }
       }
 
       // Tối ưu hóa hiệu năng: Nhảy nhanh nếu không có lịch đấu nào trong 7 ngày tới
@@ -1842,7 +985,11 @@ export async function renamePlayerAction(playerId: string, newName: string, newR
 export async function getTournamentsAction() {
   try {
     const defaultTournaments = [
-      { id: "REGIONAL", name: "Regional Season (Giải đấu khu vực)" },
+      { id: "LCK", name: "League of Legends Champions Korea (LCK)" },
+      { id: "LCP", name: "League of Legends Champions Pacific (LCP)" },
+      { id: "LPL", name: "Tencent League of Legends Pro League (LPL)" },
+      { id: "LEC", name: "League of Legends EMEA Championship (LEC)" },
+      { id: "CBLOL", name: "Campeonato Brasileiro de League of Legends (CBLOL)" },
       { id: "FIRST_STAND", name: "First Stand" },
       { id: "MSI", name: "Mid-Season Invitational (MSI)" },
       { id: "EWC", name: "Esports World Cup (EWC)" },
@@ -1852,6 +999,10 @@ export async function getTournamentsAction() {
     const dbTournaments = await db.tournament.findMany();
     const tournamentMap: Record<string, { name: string; imageUrl: string | null }> = {};
     for (const t of dbTournaments) {
+      if (t.id === "REGIONAL") {
+        await db.tournament.delete({ where: { id: "REGIONAL" } });
+        continue;
+      }
       tournamentMap[t.id] = { name: t.name, imageUrl: t.imageUrl };
     }
 

@@ -214,21 +214,26 @@ export async function adminCreateTeamAction(data: {
     // 2. Tạo cho toàn bộ user
     const users = await db.user.findMany({ select: { id: true } });
     for (const u of users) {
-      await db.team.create({
-        data: {
-          name: data.name,
-          region: data.region,
-          budget: Number(data.budget),
-          salaryCap: Number(data.salaryCap),
-          logoUrl: data.logoUrl || null,
-          abbreviation: data.abbreviation || null,
-          isUser: false,
-          wins: 0,
-          losses: 0,
-          points: 0,
-          userId: u.id,
-        }
+      const existingTeam = await db.team.findFirst({
+        where: { name: data.name, userId: u.id }
       });
+      if (!existingTeam) {
+        await db.team.create({
+          data: {
+            name: data.name,
+            region: data.region,
+            budget: Number(data.budget),
+            salaryCap: Number(data.salaryCap),
+            logoUrl: data.logoUrl || null,
+            abbreviation: data.abbreviation || null,
+            isUser: false,
+            wins: 0,
+            losses: 0,
+            points: 0,
+            userId: u.id,
+          }
+        });
+      }
     }
 
     revalidatePath("/");

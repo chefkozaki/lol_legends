@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaLibSql } from "@prisma/adapter-libsql";
+import { createClient } from "@libsql/client";
 import path from "path";
 
 const globalForPrisma = globalThis as unknown as {
@@ -10,15 +11,25 @@ function createPrismaClient() {
   const tursoUrl = process.env.TURSO_DATABASE_URL;
   const tursoToken = process.env.TURSO_AUTH_TOKEN;
 
-  // Sử dụng Turso nếu có URL, ngược lại luôn dùng file local
-  const url = (tursoUrl && tursoUrl !== "undefined" && tursoUrl.length > 0) 
-    ? tursoUrl 
-    : `file:${path.join(process.cwd(), "prisma", "dev.db")}`;
+  const isTurso = (tursoUrl && tursoUrl !== "undefined" && tursoUrl.length > 0);
 
-  const adapter = new PrismaLibSql({
-    url,
-    authToken: tursoToken,
-  });
+  let libsql;
+
+  if (isTurso) {
+    // Vercel Serverless Environment: Kết nối thẳng tới Turso qua HTTP/WebSocket
+    libsql = createClient({
+      url: tursoUrl!,
+      authToken: tursoToken,
+    });
+  } else {
+    // Chỉ dùng cho môi trường dev không có internet / Turso
+    const localDbUrl = `file:${path.join(process.cwd(), "prisma", "dev.db")}`;
+    libsql = createClient({
+      url: localDbUrl,
+    });
+  }
+
+  const adapter = new PrismaLibSql(libsql);
   
   return new PrismaClient({
     adapter,

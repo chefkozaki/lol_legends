@@ -4,7 +4,7 @@ import React, { useState, useTransition, useEffect } from "react";
 import { advanceDayAction, readMailAction, deleteMailAction, signFreeAgentAction, releasePlayerAction, submitDraftAndPlayAction, renameTeamAction, renamePlayerAction } from "@/lib/game/actions";
 import { MatchSimulationResult } from "@/lib/game/engine";
 import { logoutAction } from "@/lib/game/authActions";
-import { adminUpdatePlayerAction, adminUpdateTeamAction, adminGetUsersAction, adminDeleteUserAction, adminCreateTeamAction, adminCreatePlayerAction, adminUpdateChampionTiersAction, adminSendGlobalMailAction } from "@/lib/game/adminActions";
+import { adminUpdatePlayerAction, adminUpdateTeamAction, adminGetUsersAction, adminDeleteUserAction, adminCreateTeamAction, adminCreatePlayerAction, adminUpdateChampionTiersAction, adminSendGlobalMailAction, adminUpdateTournamentAction } from "@/lib/game/adminActions";
 import { CHAMPIONS } from "@/lib/game/champions";
 import PlayerRadarChart from "./PlayerRadarChart";
 import DraftScreen from "./DraftScreen";
@@ -118,26 +118,59 @@ interface GameState {
   seasonState: string;
 }
 
-function getSeasonStateLabel(state: string): string {
+function getSeasonStateLabel(state: string, region: string = "LCK"): string {
+  const isLCK = region === "LCK";
+  const domestic1 = isLCK ? "LCK Round 1-2" : `${region} Split 1`;
+  const domestic2 = isLCK ? "LCK Round 3-4" : `${region} Split 2`;
+
   const mapping: Record<string, string> = {
-    FIRST_STAND_QF: "First Stand - Tứ Kết",
-    FIRST_STAND_SF: "First Stand - Bán Kết",
-    FIRST_STAND_F: "First Stand - Chung Kết",
-    REGIONAL_SEASON: "Mùa Giải Khu Vực",
-    REGIONAL_REGULAR: "Vòng Bảng Khu Vực",
-    REGIONAL_PLAYOFF_SF: "Playoffs Khu Vực - Bán Kết",
-    REGIONAL_PLAYOFF_F: "Playoffs Khu Vực - Chung Kết",
-    MSI_GROUPS: "MSI - Vòng Bảng",
-    MSI_PLAYOFF_SF: "MSI - Bán Kết",
-    MSI_PLAYOFF_F: "MSI - Chung Kết",
+    CUP: `${region} Cup (Vòng Bảng)`,
+    FST_QF: "First Touch - Tứ Kết",
+    FST_SF: "First Touch - Bán Kết",
+    FST_F: "First Touch - Chung Kết",
+    DOMESTIC_1: `${domestic1} - Vòng Bảng`,
+    DOMESTIC_1_PLAYOFFS_R1: `${domestic1} - Playoffs Vòng 1`,
+    DOMESTIC_1_PLAYOFFS_R2: `${domestic1} - Playoffs Vòng 2`,
+    DOMESTIC_1_PLAYOFFS_R3: `${domestic1} - Playoffs Vòng 3`,
+    DOMESTIC_1_PLAYOFFS_R4: `${domestic1} - Playoffs Chung Kết`,
+    ROAD_TO_EWC_R1: `Road to EWC - Vòng 1`,
+    ROAD_TO_EWC_R2: `Road to EWC - Vòng 2`,
+    ROAD_TO_EWC_R3: `Road to EWC - Chung Kết`,
     EWC_QF: "EWC - Tứ Kết",
     EWC_SF: "EWC - Bán Kết",
     EWC_F: "EWC - Chung Kết",
+    ROAD_TO_MSI_R1: `Road to MSI - Vòng 1`,
+    ROAD_TO_MSI_R2: `Road to MSI - Vòng 2`,
+    ROAD_TO_MSI_R3: `Road to MSI - Chung Kết`,
+    MSI_QF: "MSI - Tứ Kết",
+    MSI_SF: "MSI - Bán Kết",
+    MSI_F: "MSI - Chung Kết",
+    DOMESTIC_2: `${domestic2} - Vòng Bảng`,
+    DOMESTIC_2_PLAYOFFS_R1: `${domestic2} - Playoffs Vòng 1`,
+    DOMESTIC_2_PLAYOFFS_R2: `${domestic2} - Playoffs Vòng 2`,
+    DOMESTIC_2_PLAYOFFS_R3: `${domestic2} - Playoffs Vòng 3`,
+    DOMESTIC_2_PLAYOFFS_R4: `${domestic2} - Playoffs Chung Kết`,
+    LCK_PLAYIN_R3: "LCK Playin - Bán Kết Nhánh Thắng/Thua",
+    LCK_PLAYIN_R4: "LCK Playin - Chung Kết",
+    WORLDS_QF: "Worlds - Tứ Kết",
+    WORLDS_SF: "Worlds - Bán Kết",
+    WORLDS_F: "Worlds - Chung Kết",
+    OFF_SEASON: "Kỳ Chuyển Nhượng",
+    // OLD MAPPINGS (Backward Compatibility)
+    FIRST_STAND_QF: "First Stand - Tứ Kết",
+    FIRST_STAND_SF: "First Stand - Bán Kết",
+    FIRST_STAND_F: "First Stand - Chung Kết",
+    REGIONAL_SEASON: `Mùa Giải ${region}`,
+    REGIONAL_REGULAR: `Vòng Bảng ${region}`,
+    REGIONAL_PLAYOFF_SF: `Playoffs ${region} - Bán Kết`,
+    REGIONAL_PLAYOFF_F: `Playoffs ${region} - Chung Kết`,
+    MSI_GROUPS: "MSI - Vòng Bảng",
+    MSI_PLAYOFF_SF: "MSI - Bán Kết",
+    MSI_PLAYOFF_F: "MSI - Chung Kết",
     WORLDS_GROUPS: "Worlds - Vòng Bảng",
     WORLDS_PLAYOFF_QF: "Worlds - Tứ Kết",
     WORLDS_PLAYOFF_SF: "Worlds - Bán Kết",
-    WORLDS_PLAYOFF_F: "Worlds - Chung Kết",
-    OFF_SEASON: "Kỳ Chuyển Nhượng"
+    WORLDS_PLAYOFF_F: "Worlds - Chung Kết"
   };
   return mapping[state] || state;
 }
@@ -176,8 +209,14 @@ export default function GameDashboard({
 }: GameDashboardProps) {
   const [activeTab, setActiveTab] = useState<string>("overview");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
-  const [selectedMailId, setSelectedMailId] = useState<string | null>(allMails[0]?.id || null);
-  const selectedMail = allMails.find(m => m.id === selectedMailId) || allMails[0] || null;
+  const [localMails, setLocalMails] = useState<Mail[]>(allMails);
+
+  useEffect(() => {
+    setLocalMails(allMails);
+  }, [allMails]);
+
+  const [selectedMailId, setSelectedMailId] = useState<string | null>(localMails[0]?.id || null);
+  const selectedMail = localMails.find(m => m.id === selectedMailId) || localMails[0] || null;
   const [autoMarkRead, setAutoMarkRead] = useState<boolean>(true);
 
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
@@ -320,7 +359,7 @@ export default function GameDashboard({
   // Gom toàn bộ tuyển thủ trong Save Game để Admin chỉnh sửa
   const allPlayersInSaveGame = [
     ...freeAgents.map(p => ({ ...p, teamName: "Tự Do", teamId: null, teamLogoUrl: null })),
-    ...allTeamsInRegion.flatMap(t => 
+    ...allTeams.flatMap(t => 
       t.players.map(p => ({ ...p, teamName: t.name, teamId: t.id, teamLogoUrl: t.logoUrl }))
     )
   ].sort((a, b) => a.name.localeCompare(b.name));
@@ -354,7 +393,7 @@ export default function GameDashboard({
   // Tự động điền dữ liệu của Team khi Admin chọn
   useEffect(() => {
     if (adminSelectedTeamId && adminTeamMode === "edit") {
-      const t = allTeamsInRegion.find(x => x.id === adminSelectedTeamId);
+      const t = allTeams.find(x => x.id === adminSelectedTeamId);
       if (t) {
         setTimeout(() => {
           setAdminTeamForm({
@@ -371,6 +410,19 @@ export default function GameDashboard({
       }
     }
   }, [adminSelectedTeamId, adminTeamMode]);
+
+  // Tự động điền dữ liệu của Giải đấu khi Admin chọn
+  useEffect(() => {
+    if (adminSelectedTeamId && adminSubTab === "tournaments") {
+      const t = tournaments[adminSelectedTeamId];
+      if (t) {
+        setTimeout(() => {
+          setAdminTeamName(t.name);
+          setAdminTeamForm(prev => ({ ...prev, logoUrl: t.imageUrl || "" }));
+        }, 0);
+      }
+    }
+  }, [adminSelectedTeamId, adminSubTab, tournaments]);
 
   // Reset form khi chuyển sang mode create
   useEffect(() => {
@@ -554,7 +606,7 @@ export default function GameDashboard({
         setMatchDayState({ matchId: res.matchId, date: res.date });
         setShowPrepScreen(true);
       } else if (res.status === "SUCCESS") {
-        setSelectedMailId(allMails[0]?.id || null);
+        setSelectedMailId(localMails[0]?.id || null);
       } else if (res.error) {
         setErrorMsg(res.error);
       }
@@ -565,6 +617,7 @@ export default function GameDashboard({
   const handleSelectMail = (mail: Mail) => {
     setSelectedMailId(mail.id);
     if (autoMarkRead && !mail.read) {
+      setLocalMails(prev => prev.map(m => m.id === mail.id ? { ...m, read: true } : m));
       startTransition(async () => {
         const res = await readMailAction(mail.id);
         if (!res.success) {
@@ -575,6 +628,7 @@ export default function GameDashboard({
   };
 
   const handleMarkMailAsRead = (mailId: string) => {
+    setLocalMails(prev => prev.map(m => m.id === mailId ? { ...m, read: true } : m));
     startTransition(async () => {
       const res = await readMailAction(mailId);
       if (!res.success) {
@@ -585,13 +639,18 @@ export default function GameDashboard({
 
   const handleDeleteMail = (mailId: string) => {
     if (!confirm("Bạn có chắc chắn muốn xóa thư này? Thao tác này không thể hoàn tác.")) return;
+    
+    // Optimistic delete
+    const remainingMails = localMails.filter(m => m.id !== mailId);
+    setLocalMails(remainingMails);
+    setSelectedMailId(remainingMails[0]?.id || null);
+
     startTransition(async () => {
       const res = await deleteMailAction(mailId);
-      if (res.success) {
-        const remainingMails = allMails.filter(m => m.id !== mailId);
-        setSelectedMailId(remainingMails[0]?.id || null);
-      } else {
+      if (!res.success) {
         alert("Lỗi xóa thư: " + res.error);
+        // Rollback on error
+        setLocalMails(allMails);
       }
     });
   };
@@ -698,6 +757,10 @@ export default function GameDashboard({
 
   // Ước lượng tổng quỹ lương
   const currentTotalSalary = userTeam.players.reduce((sum, p) => sum + p.salary, 0);
+
+  // Xác định ID giải đấu hiện tại để lấy logo
+  const currentTournamentId = ["FIRST_STAND", "MSI", "EWC", "WORLDS"].find(id => initialGameState.seasonState.includes(id)) || userTeam?.region;
+  const currentTournamentLogo = tournaments[currentTournamentId]?.imageUrl;
 
   // --- DATABASE EXPLORER CALCULATIONS ---
   const allSavePlayers = React.useMemo(() => {
@@ -821,8 +884,8 @@ export default function GameDashboard({
   // --- RENDERING DRAFT HOẶC MATCH LIVE ---
   if (showPrepScreen && matchDayState) {
     const match = userMatches.find(m => m.id === matchDayState.matchId);
-    const homeTeam = allTeamsInRegion.find(t => t.name === match?.homeTeam.name);
-    const awayTeam = allTeamsInRegion.find(t => t.name === match?.awayTeam.name);
+    const homeTeam = allTeams.find(t => t.name === match?.homeTeam.name);
+    const awayTeam = allTeams.find(t => t.name === match?.awayTeam.name);
 
     if (homeTeam && awayTeam) {
       const homePrepTeam = {
@@ -891,11 +954,11 @@ export default function GameDashboard({
     const opponentName = match?.homeTeamId === userTeam.id ? match?.awayTeam.name : match?.homeTeam.name;
     const isUserHome = match?.homeTeamId === userTeam.id;
     const opponentTeamId = isUserHome ? match?.awayTeamId : match?.homeTeamId;
-    const opponentTeam = allTeamsInRegion.find(t => t.id === opponentTeamId);
+    const opponentTeam = allTeams.find(t => t.id === opponentTeamId);
     const opponentPlayers = opponentTeam?.players || [];
 
-    const homeTeam = allTeamsInRegion.find(t => t.name === match?.homeTeam.name);
-    const awayTeam = allTeamsInRegion.find(t => t.name === match?.awayTeam.name);
+    const homeTeam = allTeams.find(t => t.name === match?.homeTeam.name);
+    const awayTeam = allTeams.find(t => t.name === match?.awayTeam.name);
     const homeWins = homeTeam?.wins ?? 0;
     const homeLosses = homeTeam?.losses ?? 0;
     const awayWins = awayTeam?.wins ?? 0;
@@ -1016,8 +1079,12 @@ export default function GameDashboard({
         {/* Thông tin nhanh về tài chính & ngày hiện tại */}
         <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-zinc-300">
           <div className="flex items-center gap-1.5 bg-zinc-950 px-3 py-2 rounded-lg border border-zinc-850">
-            <Trophy className="w-3.5 h-3.5 text-yellow-500" />
-            <span>Giải đấu: <span className="text-yellow-400 font-bold">{getSeasonStateLabel(initialGameState.seasonState)}</span></span>
+            {currentTournamentLogo ? (
+              <img src={currentTournamentLogo} alt="Tournament Logo" className="w-4 h-4 object-contain rounded-sm" />
+            ) : (
+              <Trophy className="w-3.5 h-3.5 text-yellow-500" />
+            )}
+            <span>Giải đấu: <span className="text-yellow-400 font-bold">{getSeasonStateLabel(initialGameState.seasonState, userTeam?.region)}</span></span>
           </div>
 
           <div className="flex items-center gap-1.5 bg-zinc-950 px-3 py-2 rounded-lg border border-zinc-850">
@@ -1121,19 +1188,19 @@ export default function GameDashboard({
             }`} />
             <span className={isSidebarCollapsed ? "md:hidden" : ""}>Hộp Thư (Inbox)</span>
             
-            {allMails.filter(m => !m.read).length > 0 && (
+            {localMails.filter(m => !m.read).length > 0 && (
               isSidebarCollapsed ? (
                 <span className="absolute top-2 right-2 w-2 h-2 bg-red-600 rounded-full md:block hidden" />
               ) : (
                 <Badge className="bg-red-600 text-zinc-100 border-none ml-auto text-[10px] px-1.5 py-0 md:inline-flex hidden">
-                  {allMails.filter(m => !m.read).length}
+                  {localMails.filter(m => !m.read).length}
                 </Badge>
               )
             )}
             
-            {allMails.filter(m => !m.read).length > 0 && (
+            {localMails.filter(m => !m.read).length > 0 && (
               <Badge className="bg-red-600 text-zinc-100 border-none ml-auto text-[10px] px-1.5 py-0 md:hidden">
-                {allMails.filter(m => !m.read).length}
+                {localMails.filter(m => !m.read).length}
               </Badge>
             )}
           </Button>
@@ -1522,7 +1589,11 @@ export default function GameDashboard({
                   <Card className="bg-zinc-900 border-zinc-800 shadow-xl">
                     <CardHeader className="pb-3 border-b border-zinc-800 flex flex-row justify-between items-center">
                       <CardTitle className="text-xs font-black text-zinc-400 tracking-wider uppercase flex items-center gap-2">
-                        <Trophy className="w-4 h-4 text-emerald-400" />
+                        {currentTournamentLogo ? (
+                          <img src={currentTournamentLogo} alt="Tournament Logo" className="w-5 h-5 object-contain rounded-sm" />
+                        ) : (
+                          <Trophy className="w-4 h-4 text-emerald-400" />
+                        )}
                         Xếp Hạng {userTeam.region}
                       </CardTitle>
                       <Button 
@@ -1588,17 +1659,6 @@ export default function GameDashboard({
                                   </>
                                 )}
                               </>
-                            );
-                          })()}
-                        </TableBody>
-                      </Table>
-                    </CardContent>
-                  </Card>
-
-                  {/* Hộp thư gần đây */}
-                  <Card className="bg-zinc-900 border-zinc-800 shadow-xl">
-                    <CardHeader className="pb-3 border-b border-zinc-800 flex flex-row justify-between items-center">
-                      <CardTitle className="text-xs font-black text-zinc-400 tracking-wider uppercase flex items-center gap-2">
                         <MailIcon className="w-4 h-4 text-emerald-400" />
                         Hộp Thư Gần Đây
                       </CardTitle>
@@ -1670,10 +1730,10 @@ export default function GameDashboard({
                   </label>
                 </div>
                 <div className="space-y-2 flex-grow overflow-y-auto pr-1 min-h-0 lg:max-h-[calc(100vh-200px)]">
-                  {allMails.length === 0 ? (
+                  {localMails.length === 0 ? (
                     <div className="text-zinc-600 text-xs py-8 text-center font-medium">Hộp thư trống</div>
                   ) : (
-                    allMails.map(mail => (
+                    localMails.map(mail => (
                       <div
                         key={mail.id}
                         onClick={() => handleSelectMail(mail)}
@@ -2713,7 +2773,118 @@ export default function GameDashboard({
                 >
                   Gửi thư toàn SV
                 </button>
+                <button
+                  onClick={() => setAdminSubTab("tournaments")}
+                  className={`px-4 py-2 text-xs font-bold border-b-2 transition-all ${
+                    adminSubTab === "tournaments"
+                      ? "border-rose-500 text-rose-400"
+                      : "border-transparent text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  Giải đấu
+                </button>
               </div>
+
+              {/* 0. SUB-TAB ADMIN: TOURNAMENTS */}
+              {adminSubTab === "tournaments" && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-4">
+                    <h3 className="font-bold text-sm text-zinc-200 border-b border-zinc-800 pb-2">Danh sách Giải đấu</h3>
+                    <div className="space-y-1 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                      {Object.entries(tournaments).map(([id, t]) => (
+                        <div
+                          key={id}
+                          onClick={() => {
+                            setAdminSelectedTeamId(id); // Reusing this state for simplicity or create a new one
+                          }}
+                          className={`p-3 rounded-lg border cursor-pointer transition-colors flex items-center gap-3 ${
+                            adminSelectedTeamId === id ? "bg-rose-950/20 border-rose-900/50" : "bg-zinc-950/50 border-zinc-800 hover:border-zinc-700"
+                          }`}
+                        >
+                          {t.imageUrl ? (
+                            <img src={t.imageUrl} alt={t.name} className="w-8 h-8 object-contain rounded-md bg-black p-1" />
+                          ) : (
+                            <div className="w-8 h-8 rounded-md bg-zinc-800 flex items-center justify-center text-xs text-zinc-500">?</div>
+                          )}
+                          <div>
+                            <p className="text-sm font-bold text-zinc-200">{t.name}</p>
+                            <p className="text-[10px] text-zinc-500 font-mono">{id}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-4">
+                    <h3 className="font-bold text-sm text-zinc-200 border-b border-zinc-800 pb-2">Chỉnh sửa Giải đấu</h3>
+                    {adminSelectedTeamId && tournaments[adminSelectedTeamId] ? (
+                      <div className="space-y-4">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Tên giải đấu</label>
+                          <Input
+                            value={adminTeamName}
+                            onChange={(e) => setAdminTeamName(e.target.value)}
+                            className="bg-black/50 border-zinc-800 text-sm h-9"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">URL Logo</label>
+                          <div className="flex gap-2">
+                            <Input
+                              value={adminTeamForm.logoUrl}
+                              onChange={(e) => setAdminTeamForm({ ...adminTeamForm, logoUrl: e.target.value })}
+                              className="bg-black/50 border-zinc-800 text-sm h-9 flex-1"
+                              placeholder="https://..."
+                            />
+                            <div className="relative">
+                              <Button variant="outline" size="icon" className="h-9 w-9 shrink-0 relative overflow-hidden">
+                                <Search className="w-4 h-4" />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) => handleImageUpload(e, (base64) => setAdminTeamForm({ ...adminTeamForm, logoUrl: base64 }))}
+                                  className="absolute inset-0 opacity-0 cursor-pointer"
+                                />
+                              </Button>
+                            </div>
+                          </div>
+                          {adminTeamForm.logoUrl && (
+                            <div className="mt-2 p-2 bg-black rounded-md inline-block">
+                              <img src={adminTeamForm.logoUrl} alt="Preview" className="h-16 object-contain" />
+                            </div>
+                          )}
+                        </div>
+                        <Button 
+                          onClick={() => {
+                            if (!adminSelectedTeamId) return;
+                            startTransition(async () => {
+                              const res = await adminUpdateTournamentAction(adminSelectedTeamId, {
+                                name: adminTeamName,
+                                imageUrl: adminTeamForm.logoUrl
+                              });
+                              if (res.success) {
+                                alert("Cập nhật giải đấu thành công!");
+                                setTournaments(prev => ({
+                                  ...prev,
+                                  [adminSelectedTeamId]: { name: adminTeamName, imageUrl: adminTeamForm.logoUrl }
+                                }));
+                              } else alert(res.error);
+                            });
+                          }} 
+                          className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold"
+                        >
+                          Lưu Thay Đổi
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-12 text-zinc-500">
+                        <Trophy className="w-12 h-12 mb-3 opacity-20" />
+                        <p className="text-sm">Chọn một giải đấu ở danh sách bên trái để chỉnh sửa</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* 1. SUB-TAB ADMIN: PLAYERS */}
               {adminSubTab === "players" && (
@@ -2862,14 +3033,14 @@ export default function GameDashboard({
                                   <SelectValue placeholder="Chọn đội...">
                                     {(val) => {
                                       if (val === "free") return "Tự Do (Free Agent)";
-                                      const team = allTeamsInRegion.find(t => t.id === val);
+                                      const team = allTeams.find(t => t.id === val);
                                       return team ? `${team.name} (${team.region})` : val;
                                     }}
                                   </SelectValue>
                                 </SelectTrigger>
                                 <SelectContent className="bg-zinc-900 border-zinc-850 text-zinc-200">
                                   <SelectItem value="free">Tự Do (Free Agent)</SelectItem>
-                                  {allTeamsInRegion.map(team => (
+                                  {allTeams.map(team => (
                                     <SelectItem key={team.id} value={team.id}>
                                       {team.name} ({team.region})
                                     </SelectItem>
@@ -3009,13 +3180,13 @@ export default function GameDashboard({
                           <SelectTrigger className="bg-zinc-950 border-zinc-800 text-zinc-200 w-full text-xs">
                             <SelectValue placeholder="Chọn đội tuyển...">
                               {(val) => {
-                                const t = allTeamsInRegion.find(x => x.id === val);
+                                const t = allTeams.find(x => x.id === val);
                                 return t ? `${t.name} (Giải: ${t.region})${t.isUser ? " - Đội của bạn" : ""}` : val;
                               }}
                             </SelectValue>
                           </SelectTrigger>
                           <SelectContent className="bg-zinc-900 border-zinc-850 text-zinc-200">
-                            {allTeamsInRegion.map(t => (
+                            {allTeams.map(t => (
                               <SelectItem key={t.id} value={t.id} className="text-xs">
                                 {t.name} (Giải: {t.region}) {t.isUser ? "- Đội của bạn" : ""}
                               </SelectItem>
@@ -3056,7 +3227,7 @@ export default function GameDashboard({
                     <Card className="lg:col-span-2 bg-zinc-900 border-zinc-800 shadow-xl">
                       <CardHeader className="py-4 border-b border-zinc-800">
                         <CardTitle className="text-base font-extrabold text-rose-400">
-                          {adminTeamMode === "create" ? "TẠO MỚI ĐỘI TUYỂN" : `CHỈNH SỬA THÔNG TIN ĐỘI: ${allTeamsInRegion.find(x => x.id === adminSelectedTeamId)?.name}`}
+                          {adminTeamMode === "create" ? "TẠO MỚI ĐỘI TUYỂN" : `CHỈNH SỬA THÔNG TIN ĐỘI: ${allTeams.find(x => x.id === adminSelectedTeamId)?.name}`}
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="py-6 grid grid-cols-1 sm:grid-cols-2 gap-4">

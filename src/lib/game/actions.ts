@@ -20,6 +20,16 @@ async function initializeUserSaveGame(userId: string, templateTeamId: string) {
     await db.gameState.delete({ where: { userId } });
   }
   await db.match.deleteMany({ where: { userId } });
+  
+  const userTeams = await db.team.findMany({ where: { userId }, select: { id: true } });
+  const teamIds = userTeams.map(t => t.id);
+  if (teamIds.length > 0) {
+    await db.player.updateMany({
+      where: { teamId: { in: teamIds } },
+      data: { teamId: null }
+    });
+  }
+
   await db.player.deleteMany({ where: { userId } });
   await db.team.deleteMany({ where: { userId } });
   await db.mail.deleteMany({ where: { userId } });

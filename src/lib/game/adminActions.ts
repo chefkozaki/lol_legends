@@ -160,6 +160,25 @@ export async function adminDeleteUserAction(userId: string) {
       throw new Error("Bạn không thể tự xóa tài khoản của chính mình.");
     }
 
+    // Xóa thủ công để tránh lỗi SQLITE_CONSTRAINT (Diamond cascade & Multiple cascade paths)
+    await db.match.deleteMany({ where: { userId } });
+    
+    // Các tuyển thủ tự do (userId=null) có thể đang ký hợp đồng với đội của user này. 
+    // Tránh lỗi khi xóa đội, ta gỡ teamId của họ ra trước.
+    const userTeams = await db.team.findMany({ where: { userId }, select: { id: true } });
+    const teamIds = userTeams.map(t => t.id);
+    if (teamIds.length > 0) {
+      await db.player.updateMany({
+        where: { teamId: { in: teamIds } },
+        data: { teamId: null }
+      });
+    }
+
+    await db.player.deleteMany({ where: { userId } });
+    await db.team.deleteMany({ where: { userId } });
+    await db.mail.deleteMany({ where: { userId } });
+    await db.gameState.delete({ where: { userId } }).catch(() => {}); // catch lỡ không có
+
     await db.user.delete({
       where: { id: userId }
     });

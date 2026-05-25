@@ -1659,6 +1659,17 @@ export default function GameDashboard({
                                   </>
                                 )}
                               </>
+                            );
+                          })()}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+
+                  {/* Hộp thư mini */}
+                  <Card className="bg-zinc-900 border-zinc-800 shadow-xl">
+                    <CardHeader className="pb-3 border-b border-zinc-800 flex flex-row justify-between items-center">
+                      <CardTitle className="text-xs font-black text-zinc-400 tracking-wider uppercase flex items-center gap-2">
                         <MailIcon className="w-4 h-4 text-emerald-400" />
                         Hộp Thư Gần Đây
                       </CardTitle>

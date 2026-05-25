@@ -13,23 +13,23 @@ function createPrismaClient() {
 
   const isTurso = (tursoUrl && tursoUrl !== "undefined" && tursoUrl.length > 0);
 
-  let libsql;
+  let config;
 
   if (isTurso) {
     // Vercel Serverless Environment: Kết nối thẳng tới Turso qua HTTP/WebSocket
-    libsql = createClient({
+    config = {
       url: tursoUrl!,
       authToken: tursoToken,
-    });
+    };
   } else {
     // Chỉ dùng cho môi trường dev không có internet / Turso
     const localDbUrl = `file:${path.join(process.cwd(), "prisma", "dev.db")}`;
-    libsql = createClient({
+    config = {
       url: localDbUrl,
-    });
+    };
   }
 
-  const adapter = new PrismaLibSql(libsql);
+  const adapter = new PrismaLibSql(config);
   
   return new PrismaClient({
     adapter,

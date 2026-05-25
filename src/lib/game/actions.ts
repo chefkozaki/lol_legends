@@ -5,7 +5,7 @@ import { simulateLoLGame, TeamDraft } from "./engine";
 import { CHAMPIONS } from "./champions";
 import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/lib/auth";
-import { generateCupSchedule, transitionTournament, addDays } from "./tournament-manager";
+import { generateCupSchedule, transitionTournament, addDays, resetTeamStats } from "./tournament-manager";
 
 // Helper addDays moved to tournament-manager.ts
 
